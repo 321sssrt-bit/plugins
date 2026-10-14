@@ -1,0 +1,878 @@
+{
+  "version": 1,
+  "packages": {
+    "@magpie-community/agent-aider": {
+      "versions": {
+        "0.1.1": {
+          "file": "tgz/magpie-community-agent-aider-0.1.1.tgz",
+          "integrity": "sha512-seMdxfxZPfmwy4qRs1RgvL6TY4tRg6Tte+El8PdkT7uMQqx5VAVJUouxA/VTK72LGMAKKsTfK7frLDOur+gwNw==",
+          "time": "2026-10-14T20:43:41.438Z",
+          "manifest": {
+            "name": "@magpie-community/agent-aider",
+            "version": "0.1.1",
+            "description": "Aider (aider.chat) as a magpie agent: pick one of magpie's models for it on the Agents page",
+            "type": "module",
+            "files": [
+              "aider.agent.js",
+              "README.md"
+            ],
+            "keywords": [
+              "magpie",
+              "magpie-agent",
+              "aider",
+              "llm-gateway"
+            ],
+            "license": "MIT",
+            "repository": {
+              "type": "git",
+              "url": "git+https://github.com/magpie-community/plugins.git",
+              "directory": "packages/aider"
+            },
+            "magpie": {
+              "agent": "./aider.agent.js",
+              "icon": "https://aider.chat/assets/icons/apple-touch-icon.png"
+            }
+          }
+        }
+      },
+      "latest": "0.1.1",
+      "readme": "# @magpie-community/agent-aider\n\n[Aider](https://aider.chat) as a magpie agent. magpie has no setup of its own\nfor Aider; with this plugin it is on magpie's Agents page like the agents\nmagpie ships with.\n\n```sh\nmagpie plugin add @magpie-community/agent-aider\n```\n\nThen pick one of magpie's models in Aider's row. magpie writes into\n`~/.aider.conf.yml`:\n\n```yaml\nmodel: openai/deepseek/deepseek-flash   # magpie's model, through litellm's openai/ prefix\nopenai-api-base: http://127.0.0.1:3425/v1\nopenai-api-key: magpie-aider            # Aider's own key, so Usage names it\nshow-model-warnings: false\n```\n\nYour comments and other settings stay. Picking Aider's own model again, or\nswitching it off, puts every key back as it was. Restart Aider after a change:\nit reads its settings when it starts.\n\nHow agent plugins work: [usemagpie.ai/docs/plugins#agents](https://usemagpie.ai/docs/plugins#agents).\n"
+    },
+    "@magpie-community/middleware-block-patterns": {
+      "versions": {
+        "0.1.1": {
+          "file": "tgz/magpie-community-middleware-block-patterns-0.1.1.tgz",
+          "integrity": "sha512-jtyTTE4ta1j+33eWoGkRz2AhiizxycDSpCS4TuuLFszE5p+eokh1QzuoyHqnq9L0Q2dIpVFy6gE9zaDM05lcPA==",
+          "time": "2026-10-14T20:43:41.765Z",
+          "manifest": {
+            "name": "@magpie-community/middleware-block-patterns",
+            "version": "0.1.1",
+            "description": "Rejects requests carrying text you list — plain substring and regular-expression matching, in every API magpie serves",
+            "type": "module",
+            "files": [
+              "block-patterns.middleware.js",
+              "README.md"
+            ],
+            "keywords": [
+              "magpie",
+              "magpie-middleware",
+              "blocklist",
+              "patterns",
+              "guardrails",
+              "llm-gateway"
+            ],
+            "license": "MIT",
+            "repository": {
+              "type": "git",
+              "url": "git+https://github.com/magpie-community/plugins.git",
+              "directory": "packages/block-patterns"
+            },
+            "magpie": {
+              "middleware": "./block-patterns.middleware.js",
+              "options": {
+                "words": [
+                  "project-codename"
+                ],
+                "patterns": [],
+                "system": true,
+                "message": ""
+              }
+            }
+          }
+        }
+      },
+      "latest": "0.1.1",
+      "readme": "# @magpie-community/middleware-block-patterns\n\nRejects requests that contain text you list, as [magpie](https://usemagpie.ai) gateway middleware. A request with one of your words or patterns in it is turned away with a 400 before it reaches a model; everything else is sent on untouched.\n\nInstall it from magpie's **Plugins › Discover**, or with `magpie plugin add @magpie-community/middleware-block-patterns`. Set its options under **Plugins › Installed › Options**, or with `magpie plugin options block-patterns '<json>'`.\n\n## Options\n\n```json\n{ \"words\": [\"project-codename\"],\n  \"patterns\": [\"\\\\b\\\\d{3}-\\\\d{4}\\\\b\"],\n  \"system\": true,\n  \"message\": \"\" }\n```\n\n- **`words`.** Plain substrings, matched anywhere in the text, ignoring case.\n- **`patterns`.** Regular expressions, also matched ignoring case.\n- **`system`.** `true` (the default) reads the system prompt as well as the user's turns, so a word in either turns the request away. `false` leaves every system prompt out and reads the user's turns alone. Where each API keeps its system prompt is listed under \"What it reads\".\n- **`message`.** The error text to use in place of the default one.\n\n## What it reads\n\nEvery content shape an agent sends, in all four APIs magpie serves: plain string content, `text` and `input_text` blocks, Responses `input` items, and Gemini `parts`. Anthropic, Chat Completions, Responses and Gemini are all covered.\n\nEvery user turn is read, not only the last one, so a word earlier in the conversation is caught. System prompts are read too, unless you set `system` to `false`. Each API keeps its system prompt in its own place, and all of them are read:\n\n| API | Read when `system` is true |\n|---|---|\n| Anthropic | the top-level `system` field, as a string or as text blocks, and any `system` / `developer` message |\n| Chat Completions | any `system` / `developer` message |\n| Responses | `instructions`, and any `system` / `developer` input item |\n| Gemini | `systemInstruction` and `system_instruction`, as a string or as a `{ parts }` object |\n\nTool calls, tool arguments, tool results and Gemini thought parts are never read, so a file an agent reads that contains a word doesn't stop it, and a word the model said back doesn't either.\n\n## If a pattern does not compile\n\nA `patterns` entry that is not a valid regular expression is ignored, and the rest of your options still work. Nothing is thrown: a typo in one entry cannot turn away every request the gateway sees. Fix the pattern in **Plugins › Installed › Options** — the entries that failed are not reported, so check the spelling if a word you listed seems to be passing through.\n\n## What it is not\n\nThis is literal matching, not a safety classifier. It does not understand what a request means, and it does not judge whether anything is harmful. A synonym, a paraphrase, a misspelling or a word split by formatting passes it. Don't rely on it as a real guardrail against a determined prompt: use it to keep listed text — an internal codename, a customer's name, an unreleased feature — out of what your gateway sends.\n\n## Word Guard vs this\n\nBoth match a list of words and regular expressions, and both can turn a request away, so it is worth saying which to install.\n\n- **Word Guard** can mask a match and send the request on, and can mask matches in the replies as well. It reads only the last user message by default, and never reads a system prompt.\n- **This one** only turns requests away — there is no mask and it never reads replies. In exchange it reads every user turn and every system prompt, wherever the API keeps it.\n\nInstall this one when you want a listed word to be an error rather than something silently rewritten, and when a system prompt is part of what you want to keep off the wire. Install Word Guard when you would rather the request go through with the word blanked out. They can be installed together.\n\nmagpie already redacts secrets (API keys and tokens) before a request leaves your computer, and puts them back in the reply. Neither package is needed for that.\n\n中文：按你列出的词与正则拒绝请求（纯字面匹配，不是安全分类器），可选择是否读取 system 提示词。\n"
+    },
+    "@magpie-community/middleware-model-map": {
+      "versions": {
+        "0.1.1": {
+          "file": "tgz/magpie-community-middleware-model-map-0.1.1.tgz",
+          "integrity": "sha512-/nfEkPGSu3H6ObhUpQfDKJJo6uBh2JWgqKvKuo9PTxpVkw6v3lB2yPs38WPOEweq3M9cfI0LZ1NO3uIJxkKbNg==",
+          "time": "2026-10-14T20:43:44.939Z",
+          "manifest": {
+            "name": "@magpie-community/middleware-model-map",
+            "version": "0.1.1",
+            "description": "New API's model_mapping (模型重定向) as magpie gateway middleware: send the model an agent asks for as another, and keep the asked name in replies",
+            "type": "module",
+            "files": [
+              "model-map.middleware.js",
+              "README.md"
+            ],
+            "keywords": [
+              "magpie",
+              "magpie-middleware",
+              "new-api",
+              "model-mapping",
+              "llm-gateway"
+            ],
+            "license": "MIT",
+            "repository": {
+              "type": "git",
+              "url": "git+https://github.com/magpie-community/plugins.git",
+              "directory": "packages/model-map"
+            },
+            "magpie": {
+              "middleware": "./model-map.middleware.js",
+              "options": {
+                "mapping": {
+                  "fast": "deepseek-chat",
+                  "/^gpt-4o(-.*)?$/": "deepseek-chat"
+                }
+              }
+            }
+          }
+        }
+      },
+      "latest": "0.1.1",
+      "readme": "# @magpie-community/middleware-model-map\n\nNew API's **模型重定向** (a channel's `model_mapping`) as [magpie](https://usemagpie.ai) gateway middleware. The model an agent asks for is sent upstream as another model. Replies then name the model the agent asked for, so an agent that reads its model's name back (Claude Code does, to size its context window) sees the name it asked for.\n\nInstall it from magpie's **Plugins › Discover**, or with `magpie plugin add @magpie-community/middleware-model-map`. Set its options under **Plugins › Installed › Options**, or with `magpie plugin options model-map '<json>'`.\n\n## Options\n\n```json\n{ \"mapping\": {\n    \"fast\": \"deepseek-chat\",\n    \"/^claude-(.*)$/\": \"glm-$1\"\n} }\n```\n\n- **Mapping.** A name maps to its target. Names chain (`a → b → c`) until there is nothing more to map, and a cycle stops before it repeats.\n- **Patterns.** A key written `/like this/` is a regular expression, and its target can use `$1` for the first group.\n- **Flat form.** New API's flat form, `{\"fast\": \"deepseek-chat\"}`, works as well.\n- **`keep_upstream_name`.** Set it to `true` to leave the upstream model's name in replies.\n\nThe target has to be a model magpie can route: a model of one of your providers, or one of magpie's own ids (`deepseek/deepseek-chat`, for example).\n\n**Gemini.** A Gemini request names its model in the URL; magpie moves it into the body before the middleware runs, so it is mapped like any other API, and the reply's `modelVersion` names the model asked for again.\n\n中文：New API 的「模型重定向」，作为 magpie 网关中间件。回复里的模型名会还原成 agent 请求时用的名字。\n"
+    },
+    "@magpie-community/middleware-param-override": {
+      "versions": {
+        "0.1.0": {
+          "file": "tgz/magpie-community-middleware-param-override-0.1.0.tgz",
+          "integrity": "sha512-Y/ZjfsJAW1YT/n+R0O/jRDr7gH34Lv1YK9Z6TG0p8+Eo+Y4G/G99Nj/5K7MGV7YvxW5Zt40OzqELE9yfrI5jIQ==",
+          "time": "2026-10-14T20:43:45.255Z",
+          "manifest": {
+            "name": "@magpie-community/middleware-param-override",
+            "version": "0.1.0",
+            "description": "New API's param_override (参数覆盖) as magpie gateway middleware: set, delete, move and rewrite any field of what agents send, with conditions",
+            "type": "module",
+            "files": [
+              "param-override.middleware.js",
+              "README.md"
+            ],
+            "keywords": [
+              "magpie",
+              "magpie-middleware",
+              "new-api",
+              "param-override",
+              "llm-gateway"
+            ],
+            "license": "MIT",
+            "repository": {
+              "type": "git",
+              "url": "git+https://github.com/magpie-community/plugins.git",
+              "directory": "packages/param-override"
+            },
+            "magpie": {
+              "middleware": "./param-override.middleware.js",
+              "options": {
+                "operations": [
+                  {
+                    "path": "max_tokens",
+                    "mode": "set",
+                    "value": 32000,
+                    "conditions": [
+                      {
+                        "path": "max_tokens",
+                        "mode": "gt",
+                        "value": 32000
+                      }
+                    ]
+                  },
+                  {
+                    "path": "temperature",
+                    "mode": "delete",
+                    "conditions": [
+                      {
+                        "path": "model",
+                        "mode": "contains",
+                        "value": "reasoner"
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        }
+      },
+      "latest": "0.1.0",
+      "readme": "# @magpie-community/middleware-param-override\n\nNew API's **参数覆盖** (a channel's `param_override`) as [magpie](https://usemagpie.ai) gateway middleware. It sets, deletes, moves and rewrites any field of the requests agents send through magpie, whichever provider serves them. The options are New API's JSON as it is, so you can paste a `param_override` from New API unchanged.\n\nInstall it from magpie's **Plugins › Discover**, or with `magpie plugin add @magpie-community/middleware-param-override`. Then set its options under **Plugins › Installed › Options**, or with `magpie plugin options param-override '<json>'`.\n\n## Options\n\nThere are two forms, as in New API:\n\n```json\n{ \"temperature\": 0.2, \"max_tokens\": 8000 }\n```\n\nEach key is set on the body as it is.\n\n```json\n{ \"operations\": [\n  { \"path\": \"max_tokens\", \"mode\": \"set\", \"value\": 32000,\n    \"conditions\": [{ \"path\": \"max_tokens\", \"mode\": \"gt\", \"value\": 32000 }] },\n  { \"path\": \"temperature\", \"mode\": \"delete\",\n    \"conditions\": [{ \"path\": \"model\", \"mode\": \"contains\", \"value\": \"reasoner\" }] },\n  { \"mode\": \"return_error\", \"value\": { \"message\": \"opus is not allowed here\", \"status_code\": 403 },\n    \"conditions\": [{ \"path\": \"model\", \"mode\": \"contains\", \"value\": \"opus\" }] }\n] }\n```\n\nThe operations run in order. Keys set beside `operations` are applied first.\n\n| Field | |\n| --- | --- |\n| `path` | A gjson path: `a.b.0`. `messages.-1` counts from the end, `tools.*.name` matches every item, and `\\.` is a dot inside a key. |\n| `mode` | `set` (`keep_origin`: only when missing), `delete`, `move` / `copy` (`from`, `to`), `prepend` / `append` (arrays joined, strings joined, objects merged; `keep_origin` keeps keys already there), `trim_prefix`, `trim_suffix`, `ensure_prefix`, `ensure_suffix`, `trim_space`, `to_lower`, `to_upper`, `replace` / `regex_replace` (`from`, `to`; Go's `${1}` works), `return_error`, `prune_objects` |\n| `value` | What to set, join or trim. For `return_error`, a message or `{message, status_code}`; the agent gets the error in its own API's shape. For `prune_objects`, a `type` or `{type, where, conditions, logic, recursive}`. |\n| `conditions` | `[{path, mode, value, invert, pass_missing_key}]`, where `mode` is `full`, `prefix`, `suffix`, `contains`, `gt`, `gte`, `lt` or `lte`. A path is looked up in the body first, then in the request: `model`, `request_path`, `protocol` (`anthropic`, `chat`, `responses`, `gemini`), `agent`, `stream`. |\n| `logic` | `OR` (New API's default) or `AND`. |\n\nSome of New API's modes have nothing to act on here and are left out: the header modes (`set_header`, `pass_headers`…), `sync_fields`, and conditions on retries, users and groups. The middleware sees only the body.\n\nUnlike New API, an operation that can't apply is skipped (a `move` from a missing path, `trim_prefix` on a number) and the request goes on. If the middleware itself fails, magpie sends the request as it came.\n\n## Recipes\n\n- Cap `max_tokens` for a provider with a lower limit: the first example above.\n- Drop a parameter a provider refuses: `{\"path\": \"tools.*.input_examples\", \"mode\": \"delete\"}`.\n- Strip a vendor prefix from model names: `{\"path\": \"model\", \"mode\": \"trim_prefix\", \"value\": \"openai/\"}`.\n- Keep an agent off a model: `return_error` with a `model` condition.\n- Remove old thinking blocks: `{\"path\": \"messages\", \"mode\": \"prune_objects\", \"value\": \"thinking\"}`.\n\n中文：New API 的「参数覆盖」，作为 magpie 网关中间件。配置是 New API 的同一份 JSON，可以原样粘贴过来。\n"
+    },
+    "@magpie-community/middleware-system-prompt": {
+      "versions": {
+        "0.1.0": {
+          "file": "tgz/magpie-community-middleware-system-prompt-0.1.0.tgz",
+          "integrity": "sha512-Ul8ShZiLKlI26eSLZAV5XRI2Faa9ni41uACIrKlMxtztqLNI5RqRxbpzRad6PqCGjpoWvFE3NFoXzh5Qy6BSZQ==",
+          "time": "2026-10-14T20:43:45.882Z",
+          "manifest": {
+            "name": "@magpie-community/middleware-system-prompt",
+            "version": "0.1.0",
+            "description": "New API's system_prompt (系统提示词) as magpie gateway middleware: give agents' requests a system prompt of yours, in each API's own place for it",
+            "type": "module",
+            "files": [
+              "system-prompt.middleware.js",
+              "README.md"
+            ],
+            "keywords": [
+              "magpie",
+              "magpie-middleware",
+              "new-api",
+              "system-prompt",
+              "llm-gateway"
+            ],
+            "license": "MIT",
+            "repository": {
+              "type": "git",
+              "url": "git+https://github.com/magpie-community/plugins.git",
+              "directory": "packages/system-prompt"
+            },
+            "magpie": {
+              "middleware": "./system-prompt.middleware.js",
+              "options": {
+                "system_prompt": "Reply in the language the user writes in.",
+                "override": true,
+                "position": "append"
+              }
+            }
+          }
+        }
+      },
+      "latest": "0.1.0",
+      "readme": "# @magpie-community/middleware-system-prompt\n\nNew API's **系统提示词** (a channel's `system_prompt` and its override switch) as [magpie](https://usemagpie.ai) gateway middleware. It gives the requests agents send a system prompt of yours, in each API's own place for one:\n\n| API | Where the prompt goes |\n| --- | --- |\n| Anthropic | `system` |\n| Chat | the first `system` or `developer` message |\n| Responses | `instructions` |\n| Gemini | `systemInstruction` |\n\nInstall it from magpie's **Plugins › Discover**, or with `magpie plugin add @magpie-community/middleware-system-prompt`. Set its options under **Plugins › Installed › Options**, or with `magpie plugin options system-prompt '<json>'`.\n\n## Options\n\n```json\n{ \"system_prompt\": \"Reply in the language the user writes in.\",\n  \"override\": true, \"position\": \"append\",\n  \"agents\": [\"claude\"], \"models\": [\"deepseek\"] }\n```\n\n- **No system prompt yet.** A request without one gets yours.\n- **`override`.** A request that has its own prompt keeps it unchanged, unless `override` is `true`. Then yours goes in as well, placed by `position`:\n  - `\"append\"` (the default) puts yours after it. Agents cache their own prompt, so adding after it keeps that cache.\n  - `\"prepend\"` puts yours before it, as New API does. This makes the provider read the whole prompt again on every turn.\n- **`agents`.** When given, the prompt applies only to these agents, by magpie's agent ids: `claude`, `codex`, `opencode`, and so on.\n- **`models`.** When given, the prompt applies only to models whose names begin with one of these prefixes.\n\nCodex sends its own model instructions, and changing them can change how its models behave. Use `agents` to leave Codex out if you don't want that.\n\n中文：New API 的「系统提示词」，作为 magpie 网关中间件。默认把你的提示词加在 agent 自己的提示词之后，这样不会破坏提示缓存。\n"
+    },
+    "@magpie-community/middleware-think-tags": {
+      "versions": {
+        "0.1.0": {
+          "file": "tgz/magpie-community-middleware-think-tags-0.1.0.tgz",
+          "integrity": "sha512-BsEZUHFqQ0STdGMZfl41H1Q39CBSBU5N7OeH5W0wasSoWWkV3n0KI2z13x1B7g1+mEMpdNKukBtx9lCMR7oE9g==",
+          "time": "2026-10-14T20:43:46.187Z",
+          "manifest": {
+            "name": "@magpie-community/middleware-think-tags",
+            "version": "0.1.0",
+            "description": "Take a model's <think>…</think> out of its reply's text, or put a Chat reply's reasoning_content into it (New API's thinking_to_content), as magpie gateway middleware",
+            "type": "module",
+            "files": [
+              "think-tags.middleware.js",
+              "README.md"
+            ],
+            "keywords": [
+              "magpie",
+              "magpie-middleware",
+              "new-api",
+              "reasoning",
+              "think",
+              "llm-gateway"
+            ],
+            "license": "MIT",
+            "repository": {
+              "type": "git",
+              "url": "git+https://github.com/magpie-community/plugins.git",
+              "directory": "packages/think-tags"
+            },
+            "magpie": {
+              "middleware": "./think-tags.middleware.js",
+              "options": {
+                "mode": "strip"
+              }
+            }
+          }
+        }
+      },
+      "latest": "0.1.0",
+      "readme": "# @magpie-community/middleware-think-tags\n\nA model's thinking, where its reply's text is, as [magpie](https://usemagpie.ai) gateway middleware. It either takes thinking out of the text, or puts it in (New API's `thinking_to_content`).\n\nInstall it from magpie's **Plugins › Discover**, or with `magpie plugin add @magpie-community/middleware-think-tags`. Set its options under **Plugins › Installed › Options**, or with `magpie plugin options think-tags '<json>'`.\n\n## Options\n\n```json\n{ \"mode\": \"strip\" }\n```\n\n**`strip`** (the default). Some models (open reasoning models served by vLLM, Ollama and many relays) write their thinking into the reply as `<think>…</think>`. This mode takes that block out, so an agent doesn't keep it in its history and send it back every turn.\n\n- Only a block at the start of the text is taken out. A `<think>` the model writes later, in code for example, stays.\n- A tag split across streamed chunks is still found.\n- It works on Anthropic, Chat and Responses replies, streamed or whole.\n\n**`to_content`**. A Chat reply's `reasoning_content` (or `reasoning`) is put into its text as `<think>…</think>`, for a client that shows only the text.\n\n- This mode works on Chat replies only. An Anthropic thinking block carries a signature, and turned into text it would fail the next turn.\n- It changes what the agent keeps and sends back, so it suits a chat client better than a coding agent.\n\n中文：`strip` 去掉回复开头模型写出的 `<think>…</think>`；`to_content` 把 Chat 回复的 reasoning_content 放进正文（New API 的 thinking_to_content）。\n"
+    },
+    "@magpie-community/middleware-word-guard": {
+      "versions": {
+        "0.1.1": {
+          "file": "tgz/magpie-community-middleware-word-guard-0.1.1.tgz",
+          "integrity": "sha512-p2GcIw3uwN1R/ygunrvbzW3+APsTRyT58BmTM2fP7+J8dOqvfowOzB6oe89zw5urIwSK9/4hxe9fTiuoYEiSyA==",
+          "time": "2026-10-14T20:43:46.821Z",
+          "manifest": {
+            "name": "@magpie-community/middleware-word-guard",
+            "version": "0.1.1",
+            "description": "New API's sensitive-word filter (敏感词过滤) as magpie gateway middleware: turn away or mask words and patterns in what agents send, and in replies",
+            "type": "module",
+            "files": [
+              "word-guard.middleware.js",
+              "README.md"
+            ],
+            "keywords": [
+              "magpie",
+              "magpie-middleware",
+              "new-api",
+              "sensitive-words",
+              "guardrails",
+              "llm-gateway"
+            ],
+            "license": "MIT",
+            "repository": {
+              "type": "git",
+              "url": "git+https://github.com/magpie-community/plugins.git",
+              "directory": "packages/word-guard"
+            },
+            "magpie": {
+              "middleware": "./word-guard.middleware.js",
+              "options": {
+                "words": [
+                  "project-codename"
+                ],
+                "patterns": [],
+                "action": "reject",
+                "check": "last"
+              }
+            }
+          }
+        }
+      },
+      "latest": "0.1.1",
+      "readme": "# @magpie-community/middleware-word-guard\n\nNew API's **敏感词过滤** as [magpie](https://usemagpie.ai) gateway middleware. It keeps the words and patterns you list out of what agents send: a request with one is turned away, or has the word masked. It can mask them in replies too.\n\nInstall it from magpie's **Plugins › Discover**, or with `magpie plugin add @magpie-community/middleware-word-guard`. Set its options under **Plugins › Installed › Options**, or with `magpie plugin options word-guard '<json>'`.\n\n## Options\n\n```json\n{ \"words\": [\"project-codename\"],\n  \"patterns\": [\"\\\\b\\\\d{3}-\\\\d{4}\\\\b\"],\n  \"action\": \"reject\",\n  \"check\": \"last\" }\n```\n\n- **`words`.** Words matched anywhere in the text, ignoring case.\n- **`patterns`.** Regular expressions, also matched ignoring case.\n- **`action`.** `reject` (the default) turns the request away with a 400 that names the word, in the agent's API's error shape. `mask` replaces each match with `mask` (default `***`) and sends the request on.\n- **`check`.** `last` (the default) reads only the last user message that has text, which is the turn being sent. That is what New API reads. `all` reads every user message, so a word earlier in the conversation keeps turning requests away.\n- **`replies`.** Set it to `true` to mask matches in the text that comes back as well, in every API magpie serves — Anthropic, Chat, Responses and Gemini, streamed or whole. A word split across two streamed events isn't caught.\n- **`message`.** The error text to use in place of the default one.\n\nThe middleware reads only the user's own text. It doesn't read tool results, tool calls or the system prompt, so a file an agent reads that contains the word doesn't stop it.\n\nIf you want a listed word to be a 400 rather than something masked, and you also want every earlier user turn and the system prompt read, that is [block-patterns](../block-patterns). It never masks and never reads replies, so the two can be installed together.\n\nmagpie already redacts secrets (API keys and tokens) before a request leaves your computer, and puts them back in the reply. You don't need this middleware for secrets.\n\n中文：New API 的「敏感词过滤」，作为 magpie 网关中间件。只检查用户自己写的文字，可拒绝请求或替换成 `***`，也可以替换回复里的词。\n"
+    },
+    "@magpie-community/opencode-cline-auth": {
+      "versions": {
+        "0.1.8": {
+          "file": "tgz/magpie-community-opencode-cline-auth-0.1.8.tgz",
+          "integrity": "sha512-d+FkUdsnrDzIQN2Kv5753dvTm06ioueap/hEaEtV6uWcglKnDc8STiQ87unnc/UnYkGkJZGaXvbmw/KL4x8z7A==",
+          "time": "2026-10-14T20:43:42.081Z",
+          "manifest": {
+            "name": "@magpie-community/opencode-cline-auth",
+            "version": "0.1.8",
+            "description": "Cline (cline.bot) on your own account — usage billing, ClinePass and the free models — in OpenCode and magpie",
+            "type": "module",
+            "main": "./index.mjs",
+            "exports": "./index.mjs",
+            "files": [
+              "index.mjs",
+              "README.md"
+            ],
+            "keywords": [
+              "opencode",
+              "opencode-plugin",
+              "magpie",
+              "cline",
+              "clinepass"
+            ],
+            "license": "MIT",
+            "repository": {
+              "type": "git",
+              "url": "git+https://github.com/magpie-community/plugins.git",
+              "directory": "packages/cline"
+            }
+          }
+        }
+      },
+      "latest": "0.1.8",
+      "readme": "# @magpie-community/opencode-cline-auth\n\nCline (cline.bot) on your own Cline account: the models Cline's gateway\nserves — usage-billed models, ClinePass's and Cline's free models alike.\nProvider id: `cline`.\n\n## Signing in\n\n- **Cline device sign-in** — the flow Cline's own client runs: the plugin asks\n  WorkOS for a device code and opens the approval page, polls until you\n  approve, then trades the WorkOS tokens at Cline's `/api/v1/auth/register`\n  for the account's own token pair.\n- **Cline API key** — create one at [app.cline.bot → Settings → API Keys](https://app.cline.bot/dashboard/account)\n  and paste it. Sent as a plain Bearer key.\n\nThe sign-in is kept where OpenCode keeps auth (`auth.json` under the data\ndirectory); magpie keeps plugin sign-ins in its own store\n(`~/.config/magpie/plugin-auth.json`).\n\nRefreshing:\n- Access tokens are renewed through `/api/v1/auth/refresh`. Cline rotates\n  the refresh token and refuses one already spent, so the rotated pair is\n  kept in memory beside the store the moment it arrives: a save that fails\n  can't leave the next request spending the token that was already spent.\n- magpie renews the token ten minutes before it ends, through the plugin's\n  `auth.refresh`, once for the account and before its requests, models and\n  usage need it; magpie saves the new pair. OpenCode doesn't call that hook:\n  there the token is refreshed five minutes before it ends, before a\n  request, and the new pair is saved.\n- Refreshes are serialized, magpie's renewal included, so two at once can't\n  spend one token and lose the other; one that finds the token already\n  renewed uses that pair.\n- A refresh that fails for a while keeps the token that is still good, as\n  Cline's own client does (magpie tries its renewal again shortly); only a\n  refresh Cline refuses, or a token that has actually expired, is treated as\n  the sign-in gone.\n\n## Requests\n\nChat completions go to `https://api.cline.bot/api/v1/chat/completions` in\nOpenAI's format (streaming included), with `Authorization: Bearer\nworkos:<access token>` for a signed-in account or the raw API key, and the\nfull client-identity header set Cline's own clients send (`HTTP-Referer`,\n`X-Title`, `User-Agent: Cline/<version>`, `X-CLIENT-TYPE: cline-cli`,\n`X-CLIENT-VERSION`, `X-PLATFORM`, `X-PLATFORM-VERSION`, `X-CORE-VERSION`,\n`X-IS-MULTIROOT`) — pinned to Cline's current CLI release, which is also\nwhat the free models' gate reads; when Cline ships a new release, move the\npinned numbers in `index.mjs` along. All models use one `X-Task-ID` per\nnamed chat session, derived as a UUID from the session. With no named session\n(including magpie's synthetic id from the first user message), no task id\nis sent. The session crosses the plugin's hooks in a private header that is\nremoved before the request goes to Cline. Auth and account requests carry\nthe same identity. A finished non-streaming answer rides in a\n`{\"data\": …}` envelope the official clients take apart; the plugin takes it\napart too. The model list is read from\n`/api/v1/ai/cline/recommended-models` and `/api/v1/ai/cline/models` (neither\nneeds a sign-in); usage reads `/api/v1/users/me` and the account's `/balance`\n(its balance is counted in millionths of a dollar), and ClinePass's 5-hour,\nweekly and monthly limits from `/api/v1/users/me/plan/usage-limits`\n(`{limits: [{type, percentUsed, resetsAt}]}`, what app.cline.bot's\nsubscription page shows). An account without ClinePass (a 404 there) has\nnone; limits that fail to read for any other reason say so on the card beside\nthe balance, and limits read are kept when the balance can't be.\n\n### DeepSeek models only through DeepSeek's own API\n\nCline's gateway picks among the providers that serve a model. With the\n`pinUpstream` option on, a request for a DeepSeek model (`cline-pass/deepseek-…`,\nnot the `cline-free/` ones) carries `\"providerOptions\": {\"gateway\": {\"only\":\n[\"deepseek\"]}}`, so it is answered by DeepSeek's own API only — the same as\nmagpie's built-in ClinePass tick. Other models, and a request with\n`providerOptions` of its own, go as sent. It is off by default. Turn it on:\n\n- in magpie: the provider's editor › Upstream › tick \"DeepSeek models only\n  through DeepSeek's own upstream\";\n- in OpenCode: `\"provider\": {\"cline\": {\"options\": {\"pinUpstream\": true}}}` in\n  `opencode.json`, or the plugin's own options:\n  `\"plugin\": [[\"@magpie-community/opencode-cline-auth\", {\"pinUpstream\": true}]]`.\n\n## Models\n\nThe list is Cline's own, merged from the two feeds its clients read: the\nrecommended-models feed (its recommended picks, its free models and\nClinePass's) and the whole cloud catalog (`/ai/cline/models`, where the\nusage-billed models the recommended feed doesn't name live). Refreshed from\nthe live feeds whenever they answer; until then a bundled snapshot of the\nrecommended list, Cline's own default (`anthropic/claude-sonnet-5`) among it.\nCline's `clineCloud` group is left out, as Cline's own clients leave it out\nunless they opt in.\n\nEach model's context window is the cloud catalog's (`context_length`). Its\nreply limit is left unsaid: the catalog's `max_completion_tokens` can be most\nof the window, and an agent keeps that much free for the reply. The `cline-free/…`\nand `cline-pass/…` models aren't in that catalog, so they say none, and magpie\ntakes the window models.dev gives the model after the prefix\n(`cline-free/mimo-v2.6-flash` is `mimo-v2.6-flash`).\n\n- The **free** group (`cline-free/…`, `stealth/…`) costs nothing — the names\n  say \"(free)\". They are gated on the client surface a request claims; the\n  plugin claims what it is, and the gate takes it. If Cline ever narrows that\n  gate to its own apps, those models go away.\n- The **ClinePass** group (`cline-pass/…`) needs a ClinePass subscription —\n  the names say so, and asking without one answers 403.\n- The rest are usage-billed against the account's Credits balance.\n\n## Not included\n\n- Cline's MCP and web-search endpoints — a chat provider only.\n- Team/organization account switching.\n"
+    },
+    "@magpie-community/opencode-commandcode-auth": {
+      "versions": {
+        "0.1.12": {
+          "file": "tgz/magpie-community-opencode-commandcode-auth-0.1.12.tgz",
+          "integrity": "sha512-4ENDgT+ugOoTlN5rsLuVCuLrbm1C7uBpKOqtvcuz2A3fQxb6BN52tfhy+USWVfk9W7osFhRtW0nLJqbtHTwt9A==",
+          "time": "2026-10-14T20:43:42.400Z",
+          "manifest": {
+            "name": "@magpie-community/opencode-commandcode-auth",
+            "version": "0.1.12",
+            "description": "Command Code plans (Pro, GOAT, Max, Ultra, Go, Teams) in OpenCode and magpie",
+            "type": "module",
+            "main": "./index.mjs",
+            "exports": "./index.mjs",
+            "files": [
+              "index.mjs",
+              "README.md"
+            ],
+            "keywords": [
+              "opencode",
+              "opencode-plugin",
+              "magpie",
+              "commandcode"
+            ],
+            "license": "MIT",
+            "repository": {
+              "type": "git",
+              "url": "git+https://github.com/magpie-community/plugins.git",
+              "directory": "packages/commandcode"
+            }
+          }
+        }
+      },
+      "latest": "0.1.12",
+      "readme": "# @magpie-community/opencode-commandcode-auth\n\nSigns in to a [Command Code](https://commandcode.ai) plan (Pro, GOAT, Max,\nUltra, Go, Teams Pro) and makes its requests, in OpenCode and in magpie.\nProvider id: `commandcode-plan`.\n\n## Signing in\n\nAn account is a Command Code API key. There are three ways to get one:\n\n- **Command Code (browser)**: the CLI's own sign-in. Studio asks you to\n  approve a key for this machine, then posts it to a callback on\n  `127.0.0.1`. The plugin checks the key with `/alpha/whoami` and reads the\n  plan.\n- **Command Code CLI's sign-in**: takes the account `commandcode login`\n  signed in to, from `~/.commandcode/auth.json`. The file is only read,\n  never changed.\n- **API key**: paste a key from\n  [commandcode.ai/settings/keys](https://commandcode.ai/settings/keys).\n\nThe key is kept where OpenCode keeps sign-ins (`auth.json`; in magpie,\n`plugin-auth.json`) as `{ \"type\": \"api\", \"key\", \"metadata\": { \"email\": <user>, \"plan\" } }`.\nKeys don't expire, so there is nothing to refresh.\n\n## Requests\n\n- **Every plan but Go** uses the Provider API at\n  `https://api.commandcode.ai/provider/v1`. Every request carries the key\n  as both `Authorization: Bearer` and `x-api-key`.\n  - Claude models speak Anthropic's Messages API.\n  - The other models speak chat completions.\n- **Go** has no Provider API access. Its key is only accepted where the CLI\n  asks, `POST /alpha/generate`, in the CLI's own format (command-code\n  1.72.2 and its headers). The plugin's `fetch` handles this:\n  - It turns OpenCode's chat completion into that format.\n  - It turns the line-by-line reply back into a chat completion, streamed\n    or not.\n  - Failures keep their statuses: a model the plan lacks is a 403, running\n    out of credits is a 402, and a usage-window limit is a 429.\n  - A reply that stops before its finish line is a 502, unless it was\n    streamed and had already said something. Then it ends cut short, with\n    a note saying so, and `[DONE]` (#91).\n\nThe plan is read from `/alpha/billing/subscriptions`. It is cached for 10\nminutes; after a failed read, the plugin tries again after 1 minute.\nWhen the plan isn't known yet and the Provider API refuses the key with\n\"Your Go plan doesn't include API access\", the key is taken as Go's from\nthen on (and saved so with it), and a chat completion is sent again to\n`/alpha/generate`.\n\n## Models\n\nThe `config` hook declares the default list:\n\n| Model | Context window |\n|---|---|\n| Claude Sonnet 5 | 1M |\n| Claude Opus 5.5 | 1M |\n| GPT-6 Sol | 1.05M |\n| DeepSeek V4 Pro | 1M |\n| DeepSeek V4 Flash | 1M |\n| Kimi K3 | 1M |\n| GLM-5.3 | 1M |\n| MiniMax M3 | 1M |\n\nOnce signed in, the `provider.models` hook replaces the default list with\nthe account's own:\n\nCommand Code's `/models` list is the same for every plan. A plan's list is\nthat list less the models the plan may not use, as the CLI's own table\n(command-code 1.79.2) has it:\n\n- **Go** and **GOAT** may not use the premium models (Claude Sonnet 5 and\n  Opus, GPT-6 Sol, GPT-5.6 Terra, …). Go is also blocked from GOAT's own\n  (Claude Sonnet 5.5 and Haiku 5.5, GPT-5.6 Sol, Grok 4.6 and 4.7, …).\n- **Pro** may not use Claude Opus and Fable, GPT-6 Astra, GPT-6.1 Sol and\n  Fugu Ultra; **Provider** may not use GPT-6.1 Sol.\n- **Max**, **Ultra** and **Teams Pro** may use every model.\n\nAn account with bought or free credits may use every model, and so may one\nwhose plan can't be read: then the whole list is shown. A model the plan\ndoesn't have is still refused by Command Code (403 `MODEL_NOT_IN_PLAN`), and\nthat refusal reaches the agent.\n\n- **Every plan but Go**: the Provider API's `/models` list. Each model's\n  `supported_endpoints` picks the API it speaks.\n- **Go**: the same `/models` list, asked without the key (it answers\n  without one, and Go's key has no Provider API). That is 56 models as of\n  2026-10-13. When the list can't be had, the CLI's own Go table (57\n  models) stands in.\n\n  The Go models carry their reasoning levels, and a requested level is\n  fitted to the nearest one the model has.\n\nThe `/models` list doesn't say which models take images. A model is marked\nas taking them when it is a Claude model, or when the default list or the\nCLI's table says so. For any other model the plugin says nothing either\nway, and magpie answers from models.dev, as its built-in did.\n\n## Not included\n\n- Usage and quota (`/alpha/billing/credits`, the 5-hour and weekly windows).\n- Switching between several accounts. OpenCode keeps one sign-in per\n  provider.\n"
+    },
+    "@magpie-community/opencode-cursor-auth": {
+      "versions": {
+        "0.2.13": {
+          "file": "tgz/magpie-community-opencode-cursor-auth-0.2.13.tgz",
+          "integrity": "sha512-ExabPVS6beQ3RRL36MtadkH+D4uNiddXadOnAmlCOdNJVkvH1tO4Nb/ZZNlsr3JXNL3R/tN+vO6/RNVi+wglvw==",
+          "time": "2026-10-14T20:43:42.721Z",
+          "manifest": {
+            "name": "@magpie-community/opencode-cursor-auth",
+            "version": "0.2.13",
+            "description": "Cursor subscriptions (Pro, Pro+, Ultra, Teams) in OpenCode and magpie, through the API cursor-agent talks to",
+            "type": "module",
+            "main": "./index.mjs",
+            "exports": "./index.mjs",
+            "files": [
+              "index.mjs",
+              "README.md"
+            ],
+            "keywords": [
+              "opencode",
+              "opencode-plugin",
+              "magpie",
+              "cursor"
+            ],
+            "license": "MIT",
+            "repository": {
+              "type": "git",
+              "url": "git+https://github.com/magpie-community/plugins.git",
+              "directory": "packages/cursor"
+            }
+          }
+        }
+      },
+      "latest": "0.2.13",
+      "readme": "# @magpie-community/opencode-cursor-auth\n\nSigns in to a [Cursor](https://cursor.com) subscription (Pro, Pro+, Ultra,\nTeams) and makes its requests on the API `cursor-agent` talks to, in\nOpenCode and in magpie. Provider id: `cursor`.\n\n## Signing in\n\nAn account is a Cursor access token. There are three ways to get one:\n\n- **Cursor (browser)**: the sign-in `cursor-agent login` does. The page\n  `cursor.com/loginDeepControl` is opened with a PKCE challenge, and the\n  plugin polls `api2.cursor.sh/auth/poll` until the browser has signed in.\n  The account is named by its email (`DashboardService/GetMe`).\n- **cursor-agent's sign-in**: takes the account `cursor-agent login`\n  signed in to. Its token is read on every request from where the CLI\n  keeps it: the macOS keychain (`cursor-access-token`), else its\n  `auth.json` (`~/.cursor/`, `$XDG_CONFIG_HOME/cursor/` or\n  `%APPDATA%\\Cursor\\`). The plugin never writes it; when it has less than\n  5 minutes left, `cursor-agent status` is run, which renews it.\n- **Cursor API key**: a key from cursor.com/dashboard → Integrations. It is\n  exchanged for a token at `/auth/exchange_user_api_key`, as the CLI does\n  with `CURSOR_API_KEY`, and exchanged again when the token runs out.\n\nSign-ins are kept where OpenCode keeps them (`auth.json`; in magpie,\n`plugin-auth.json`). A browser sign-in's token lasts about two months.\nCursor gives the CLI no way to renew it, so after that you sign in again.\n\n## Requests\n\nOpenCode speaks chat completions (`@ai-sdk/openai-compatible`); the\nplugin's `fetch` answers them on Cursor's agent API:\n\n- The agent API is the one `ServerConfigService/GetServerConfig` names for\n  the account (a team may be served in one region only), else\n  `agentn.global.api5.cursor.sh`. A refusal that names a region is tried\n  once more with the config asked again.\n- Each request is one `agent.v1.AgentService/Run`, a Connect stream both\n  ways over HTTP/2, with the CLI's headers (`x-cursor-client-type: cli`,\n  its version, privacy mode on).\n- Where HTTP/2 can't open a Run (an error before its response, or none in\n  15 s: a proxy or network that blocks HTTP/2), it goes as Cursor's clients\n  run it without HTTP/2: `agent.v1.AgentService/RunSSE` down and a\n  `aiserver.v1.BidiService/BidiAppend` for each client message up, over\n  HTTP/1.1 on `api2.cursor.sh`, through the proxy magpie gives the request.\n  When the failure says HTTP/2 itself can't be had (no head in 15 s,\n  \"h2 is not supported\", no HTTP/2 in ALPN, a protocol error), the Runs\n  after it go straight to HTTP/1.1 for 10 minutes; a failed connection\n  (refused, no network) or a stream the server refused leaves the next Run\n  to try HTTP/2 again. A region error over HTTP/1.1 sends the Run back to\n  HTTP/2 at the region's agent host. A BidiAppend with no answer in 60 s\n  (more for a large one) ends the Run, as cursor-agent does.\n- The whole conversation goes each time, as AI SDK messages kept as blobs\n  the server asks for. The caller's tools are MCP tools, listed in the\n  system prompt; the model calls them through Cursor's `CallDynamicTool`,\n  and the calls come back as chat completion tool calls. Cursor's own tools\n  (shell, file reads, edits) are never run.\n- A conversation's Runs share one `conversation_id`, so Cursor sends them\n  to the machine that has the prompt cached (Grok on Cursor caches by\n  machine). It is made from what names the session — the request's\n  `prompt_cache_key` (Codex's thread id), else the session the\n  `chat.headers` hook is told — and the conversation's first user message,\n  so subagents under one session are conversations of their own. With\n  nothing naming the session, each Run has a new one.\n- Text, thinking (`reasoning_content`) and token usage come back streamed\n  or not. Replayed assistant `reasoning_content` (or `reasoning`) is kept as\n  AI SDK reasoning parts in the next Run's transcript, including when a\n  caller splits parallel tool calls across assistant messages. It stays\n  separate from reply text; no thinking signature is invented.\n  Cursor's `input_tokens` counts the cached prompt too: the cache\n  read and written is taken out of it, and given as `cached_tokens` and\n  `cache_write_tokens`, so it is counted once; its reasoning tokens are\n  `reasoning_tokens`. A step that calls tools gets no usage in its Run\n  (Cursor tells it only once the tools' results come back in the same\n  Run), so once the Run is closed its usage is read from the dashboard's\n  usage events, by the Run's conversation id: it shows in about 2.5 s,\n  and is looked for up to 6 s. Far from Cursor it shows later than that\n  (yetone/magpie#1053), so the step says 0 used and the conversation owes\n  it: its next steps collect the event in the background, and a step\n  that ends the turn waits for what is still owed, so the conversation\n  adds up to what Cursor counted. What a step collected of earlier steps\n  is not added to its own count, which a client reads as how full its\n  context is: it is `usage.magpie_deferred` (`prompt_tokens`,\n  `completion_tokens`, `cached_tokens`, `cache_write_tokens`), which\n  magpie bills with the step and clients ignore. An account\n  whose events miss the wait 3 steps in a row stops waiting for them.\n  With nothing naming the session (so no later step to collect it), or\n  an account that can't read its usage events, the step is estimated as\n  before.\n  Failures keep their statuses: 401 to sign in again, 429 at the\n  usage limit, 400 for a prompt too long, 403 for a region refusal.\n\n## Models\n\nThe `config` hook declares `auto` (Cursor's pick). Once signed in, the\n`provider.models` hook lists the account's models from Cursor's model\npicker (`AiService/AvailableModels`, as the CLI asks for it, cached 10\nminutes), the way pi-cursor-sdk lists Cursor's catalog:\n\n- A model with a `context` parameter is listed once per size, as\n  `<model>@<size>` named `<name> @ <size>` (`claude-opus-5-5@300k`,\n  \"Claude Opus 5.5 @ 300k\"), its window that many tokens. A model with none\n  is listed once, its window Cursor's `contextTokenLimit` (Max Mode's for a\n  model served only in Max Mode); 200K when Cursor gives none.\n- Effort is not a model of its own: the model's efforts are its variants,\n  and the request's `reasoning_effort` (fitted to the nearest there is) is\n  sent as the model's effort parameter. `none` turns a Claude's thinking off.\n- Fast is not a model of its own either: a `service_tier` of `priority`\n  or `fast` sends `fast=true`, anything else `fast=false` (it costs more,\n  so only when asked). A model listed at a size Cursor has a fast variant\n  of (served to the account) says `fast: true`, which magpie offers its\n  Fast switch for (yetone/magpie#1360).\n- A request goes as the picker's variant those parameters pick, in Max Mode\n  when that variant is Max Mode's (a 1M size, say), as the CLI turns it on.\n  A size with no variant goes in Max Mode when it is over Cursor's limit\n  outside it. A model Cursor still answers \"Max Mode Required\" for is asked\n  again in Max Mode, and so from then on.\n- Hidden, Tab-only and chat-only models stay out, as in the CLI's picker.\n- The usable list (`AgentService/GetUsableModels`, what `cursor-agent\n  models` shows) says which variants the account has: a variant whose own\n  id isn't in it is neither offered nor asked for (Sonnet 4.6 at any effort\n  but medium, say), and a request for one goes as the nearest the account\n  has. A model the usable list has nothing of is the picker's alone\n  (GLM-5.3) and is kept whole; so is every model when Cursor can't give\n  the usable list.\n- An id from before 0.2.0 still runs. A variant's own id\n  (`claude-opus-5-5-high`) is that variant; a family 0.1.x listed\n  (`claude-opus-5-5`, `claude-opus-5-5-fast`, `claude-haiku-5-5-thinking`,\n  `cursor-grok-4.6`) is its variant nearest the default, fast for a `-fast`\n  one; the picker's name for a model or a legacy slug of it is its default.\n  Each is at the default context size, the request's `reasoning_effort`\n  and `service_tier` counting as for a listed model. The list doesn't show\n  these ids: pick the `@<size>` model for a window that is the model's.\n\n## Usage\n\nmagpie shows Cursor Models, Other Models and Total for the billing period.\nAccounts with a Grok Bot allowance also show its usage and reset time;\nactive trials are labelled separately. A spent Bot allowance doesn't stop\nCursor requests.\n\nAn account that may spend on-demand once its included usage is gone (a\nteam or personal spend limit, as `cursor-agent`'s usage view shows it) also\nshows On-demand: its spend, and its limit when it has one. Cursor keeps\nserving such an account past the included usage, so magpie doesn't count\nit used up when Cursor Models or Other Models reach 100%; it does when the\non-demand spend reaches its limit. A team member with no limit of their\nown spends the team's pool: On-demand shows the pool's spend and limit,\nwith the member's own spend beside it, and the account is used up when\nthe pool is.\n\nSign in to the Cursor account linked in Grok Bot. A linked SuperGrok\nsubscription grants Bot access without a paid Cursor plan; see\n[Grok Bot plans and billing](https://cursor.com/help/grok-bot/plans).\n\n## Not included\n\n- Web search: Cursor's own web search is refused like its other tools.\n- Switching between several accounts. OpenCode keeps one sign-in per\n  provider.\n- The Responses and Messages APIs: only chat completions are answered.\n"
+    },
+    "@magpie-community/opencode-devin-auth": {
+      "versions": {
+        "0.1.16": {
+          "file": "tgz/magpie-community-opencode-devin-auth-0.1.16.tgz",
+          "integrity": "sha512-cxLPY4PhUFC2aP+e+5NyWosSihov9WtFWx0dbU8FyIb+feRT7uIc/86NHZUPpK4P4nkkaSswaJ1Wq+zl5IyhTA==",
+          "time": "2026-10-14T20:43:43.040Z",
+          "manifest": {
+            "name": "@magpie-community/opencode-devin-auth",
+            "version": "0.1.16",
+            "description": "Devin subscriptions (the devin CLI's account) in OpenCode and magpie",
+            "type": "module",
+            "main": "./index.mjs",
+            "exports": "./index.mjs",
+            "files": [
+              "index.mjs",
+              "README.md"
+            ],
+            "keywords": [
+              "opencode",
+              "opencode-plugin",
+              "magpie",
+              "devin",
+              "windsurf"
+            ],
+            "license": "MIT",
+            "repository": {
+              "type": "git",
+              "url": "git+https://github.com/magpie-community/plugins.git",
+              "directory": "packages/devin"
+            }
+          }
+        }
+      },
+      "latest": "0.1.16",
+      "readme": "# @magpie-community/opencode-devin-auth\n\nSigns in to a [Devin](https://devin.ai) subscription, the account the\n`devin` CLI uses, and makes its requests, in OpenCode and in magpie.\nProvider id: `devin`.\n\n## Signing in\n\nAn account is the CLI's session token (`devin-session-token$…`). There are\ntwo ways to get one:\n\n- **Devin (browser)**: the CLI's own `devin auth login`, run by the\n  plugin. It is a PKCE sign-in through `app.devin.ai/auth/cli/continue`\n  back to a callback on `127.0.0.1`. The code is exchanged for the token\n  at `server.codeium.com` (`ExchangeDevinCLIPKCECode`).\n- **Devin CLI's sign-in**: takes the account the CLI is signed in to, from\n  its `credentials.toml` (`$XDG_DATA_HOME/devin/`, by default\n  `~/.local/share/devin/`; `%APPDATA%\\devin\\` on Windows). The file is only\n  read, never changed.\n\nThe plugin names the account as Devin does when asked with the token\n(`GetUserStatus`: its email and tier). When Devin can't tell, and the CLI\nis installed, it asks `devin auth status`, run with a data folder of the\nplugin's own, `~/.cache/opencode-devin-auth/<hash of the token>/`, so the\nCLI's own sign-in is never touched. A CLI that reads another\n`credentials.toml` than that folder's (on Windows it reads\n`%APPDATA%\\devin\\` whatever it is run with) isn't asked: it would name\nits own account. Otherwise the account is named \"Devin\".\n\nThe token is kept where OpenCode keeps sign-ins (`auth.json`; in magpie,\n`plugin-auth.json`) as `{ \"type\": \"api\", \"key\", \"metadata\": { \"email\", \"plan\" } }`.\nDevin doesn't expire it on a schedule, so there is nothing to refresh;\nwhen it is refused, requests fail with a 401 saying to sign in again.\n\n## Requests\n\nDevin serves chat through Windsurf's API server, as the CLI does:\n`POST https://server.codeium.com/exa.api_server_pb.ApiServerService/GetChatMessage`,\na Connect RPC in protobuf, with `Authorization: Basic <token>`.\n`WINDSURF_API_SERVER_URL` moves the server, as it does for the CLI.\n\nThe plugin's `fetch` handles this:\n\n- It turns OpenCode's chat completion into the CLI's request (devin-cli\n  3000.11.3).\n  - The system prompt goes at the head of the first user message.\n  - Each tool's description goes there too, in a `<tool_descriptions>`\n    block, and the tool is sent with a pointer to it. Devin answers \"an\n    internal error occurred\" to some agents' tool descriptions when they\n    are sent as the tools' own.\n  - A tool call the conversation never answered is answered with \"Tool use\n    was interrupted and did not produce a result.\"\n  - Images must be inline (`data:` URLs); images in tool results are\n    dropped.\n- It turns the streamed reply back into a chat completion, streamed or\n  not: text, reasoning, tool calls and usage.\n- Failures keep their statuses: a refused token is a 401, a usage limit a\n  429, a prompt too long for the model a 400.\n\n## Models\n\nDevin's models are families: `swe-2`, `claude-opus-5-5`, `gpt-6-sol`, …\nEach family has variants at each effort (`swe-2-high`,\n`claude-opus-5-5-xhigh`), and some have a fast or priority run\n(`claude-opus-5-5-high-fast`). The plugin lists each family once, with\nthe efforts its variants are at, plus its fast or priority run\n(`claude-opus-5-5-fast`). The variant asked for is the one at the effort\npicked, or the nearest the family has; with none picked, the family's\ndefault. Variants at no effort (`glm-5-2-1m`) are listed as they are.\nAdaptive and Fusion aren't listed; they route between models inside\nDevin's own agent.\n\nThe `config` hook declares Devin's list as of 2026-10-14 (89 models).\nOnce signed in, the `provider.models` hook replaces it with the account's\nown: what Devin tells the CLI's model picker for the account's token\n(`GetCliModelConfigs`, the list `devin models list` prints), with or\nwithout the CLI and on every system. When Devin can't be asked, the list\nis the CLI's `devin models list`, if the CLI names the account Devin names\nthe token's (on Windows it reads its own sign-in whatever folder it is\ngiven, so it answers only for that account); else the declared list. The\nlist is cached for 5 minutes; after a failed read, the plugin tries again\nafter 1 minute.\n\nWhich models take images is what Devin tells its CLI's model picker\n(`GetCliModelConfigs`, each model's `supports_images`), asked once signed\nin, with or without the CLI, and cached as the list is: `swe-2`, `swe-1.7`\nand most others do; GLM-5.2, GLM-5.3, Inkling, Nemotron, DeepSeek V4 Flash\nand V4 Pro don't. Before Devin is asked, or when it can't be, the declared\nlist says what Devin said on 2026-10-05. A model Devin says nothing of\ntakes models.dev's word.\n\n## Not included\n\nmagpie's built-in Devin account does more than this plugin:\n\n- **Usage**: the plan's quota windows.\n- **Several accounts** at once.\n- **Web search**: its stand-in for Anthropic's server-side web search tool.\n"
+    },
+    "@magpie-community/opencode-factory-auth": {
+      "versions": {
+        "0.1.28": {
+          "file": "tgz/magpie-community-opencode-factory-auth-0.1.28.tgz",
+          "integrity": "sha512-pGMYWCWS2ITkAqMMpVPEI6FmLcmF5pCzHvHJTzs45fzMdmYOhap+KYIST9U3rwqyyDcYDFAwbSIZWOG1aJG3Uw==",
+          "time": "2026-10-14T20:43:43.356Z",
+          "manifest": {
+            "name": "@magpie-community/opencode-factory-auth",
+            "version": "0.1.28",
+            "description": "Sign in to a Factory (Droid) subscription from OpenCode or magpie",
+            "type": "module",
+            "main": "./index.mjs",
+            "files": [
+              "index.mjs",
+              "anthropic-tools.mjs",
+              "README.md"
+            ],
+            "keywords": [
+              "opencode",
+              "opencode-plugin",
+              "magpie",
+              "factory",
+              "droid"
+            ],
+            "license": "MIT",
+            "repository": {
+              "type": "git",
+              "url": "git+https://github.com/magpie-community/plugins.git",
+              "directory": "packages/factory"
+            }
+          }
+        }
+      },
+      "latest": "0.1.28",
+      "readme": "# @magpie-community/opencode-factory-auth\n\nSigns in to a [Factory](https://factory.ai) (Droid) subscription and sends\nmodel requests to Factory's API the way `droid` sends them. Provider id:\n`factory`.\n\n## Sign-in\n\n- **Sign in with Factory (device code).** This is WorkOS's device flow\n  under droid's own client. The browser opens Factory's page with the code\n  filled in. Confirm it there, and the plugin picks up the tokens.\n- **Factory API key.** A key (`fk-…`), as droid takes one from\n  `FACTORY_API_KEY`. It is sent as the bearer token with droid's headers\n  and never renewed. A key carries no organization header; `whoami`, asked\n  once with the key, says whose it is and where its organization is served.\n- **Organization.** A token that isn't in an organization yet is put in\n  the first one your account belongs to.\n- **Whoami.** The plugin asks `whoami` for your active organization, its\n  region (EU orgs go to `api.eu.factory.ai`) and any host of the org's\n  own. Every request then carries them, as droid's do.\n\n## Where the sign-in is kept\n\nThe sign-in is kept wherever the host keeps provider sign-ins:\n\n- OpenCode: `~/.local/share/opencode/auth.json`\n- magpie: `plugin-auth.json`\n\nIt holds WorkOS's access and refresh tokens, with the organization,\nregion and host.\n\n**Refreshing.**\n- magpie renews the access token three minutes before it lapses, through\n  the plugin's `auth.refresh`, once for the account and before its\n  requests and usage need it; magpie saves the new tokens. OpenCode\n  doesn't call that hook: there the token is renewed two minutes before it\n  lapses, before a request, and the plugin saves it.\n- WorkOS rotates the refresh token, so the plugin never runs two refreshes\n  at once, and never spends one refresh token twice: a request that comes\n  before magpie has saved a renewal goes on with the new tokens.\n- The account counts as signed out only when WorkOS refuses the refresh\n  token (a 4xx other than 429). Any other failure keeps the sign-in, and\n  the current token is used while it lasts.\n\n**Refusals.** If Factory refuses the organization a request names, the\nplugin asks `whoami` again and resends the request once. If the refusal\nstands, the error says what to check.\n\n## Requests from other agents\n\nFactory serves a subscription's model requests to Droid. Every request\ndroid sends opens its system prompt with \"You are Droid, an AI software\nengineering agent built by Factory.\", so another agent's request to\nFactory's OpenAI-shaped API (`/api/llm/o`: GPT and Grok on Responses, the\nopen models on chat completions) opens with that line too, the agent's own\nprompt after it. On Anthropic's Messages (`/api/llm/a`), the plugin adapts\nfixed client metadata while preserving the task instructions and history;\nsee [Claude Code through magpie](#claude-code-through-magpie) below.\n\n## Models\n\nEach model is served on the one API droid uses for it:\n\n| API | Models |\n|---|---|\n| Anthropic Messages (`/api/llm/a`) | Fable 5.1, Fable 5, Opus 5.5, Opus 5, Opus 4.8 (each also in Fast Mode), Sonnet 5.5, Sonnet 5, Sonnet 4.6, Haiku 5.5, Haiku 4.5, MiniMax M2.7 |\n| OpenAI Responses (`/api/llm/o/v1`) | GPT-6.1 Sol, GPT-6 Sol/Astra/Luna, GPT-5.6 Sol/Terra/Luna, GPT-5.5, GPT-5.4, GPT-5.3-Codex (each also in Fast Mode), Grok 4.7, Grok 4.6 |\n| Chat completions (`/api/llm/o/v1`) | GLM-5.3, GLM-5.3-Flash, GLM-5.2, Kimi K3, DeepSeek V4.1 Flash, Qwen3.8 Max, MiniMax M3, Mistral Large 4, Mistral Medium 3.5, Nemotron 3 Ultra |\n| Gemini generate (`/api/llm/g/v1/generate`) | Gemini 4 Argon, Gemini 3.1 Pro, Gemini 3.8/3.7/3.6/3.5 Flash, Gemini 3 Flash |\n\nReasoning efforts are the variants droid offers for each model. DeepSeek V4.1\nFlash, Kimi K3 and GLM-5.2 have `none`, droid's \"off\": they stop thinking.\nReasoning is mandatory on GLM-5.3 and GLM-5.3-Flash (Fireworks turns `none`\naway), so `low` is their least.\n\nGemini's requests go to Factory's generate route with the model in the\nbody, droid's line opening the system instruction. Gemini 4 Argon is behind\na Factory feature flag in droid 0.241.1, so an account it isn't on for may\nbe refused it.\n\nA Fast Mode model (`claude-opus-5-5-fast`, `gpt-5.5-fast`, …) is its base\nmodel served faster, for more of the plan's credits. It goes out as droid\nsends it: its own id, with `speed: \"fast\"` and the `fast-mode-2026-02-01`\nbeta on Anthropic's API, at `service_tier: \"priority\"` on OpenAI's. A request\nthat asks the base model for fast (Claude Code's `speed: \"fast\"`, a\nResponses request's `service_tier: \"priority\"`) is sent to its Fast Mode\nmodel, as droid's own fast toggle does: asked of the base model, Factory\nanswered at standard speed (#119). Opus 4.6/4.7 Fast, GPT-5.4 Mini Fast, GPT-5.6 Sol Fast (unreleased)\nand GLM-5.2 Fast (behind a feature flag) are not included.\n\nauto is not included: droid picks it on the client side.\n\n## Requests too large\n\nFactory refuses a request body over its size limit with 413 \"Request\nEntity Too Large\". The limit is on bytes, not on the model's context, and\nimages reach it first. On a 413 the plugin sends the request once more with\nevery image and file but the newest replaced by a line saying it was left\nout, each tool result kept beside its call, as droid does. If that is still\ntoo large, or there was nothing to leave out, the error says it is\nFactory's byte limit: compact the conversation or start a new one.\n\n## Use\n\n```sh\nmagpie plugin add @magpie-community/opencode-factory-auth\nmagpie plugin login factory\n```\n\n## Claude Code through magpie\n\nFactory's Anthropic route requires Droid's fixed client preamble and\nrefuses some of Claude Code's fixed environment, model and built-in skill\nmetadata. The plugin adapts that metadata while preserving the coding\ninstructions, environment values, tool definitions, images and reasoning\noptions. Ordinary Droid requests remain unchanged, and OpenAI routes keep\ntheir existing request adapter. Quoted fixed metadata in tool results is\nhandled as described below.\nThe fixed Claude identity is recognized as a complete first line too when\nmagpie joins it with the following system instructions into one text block.\n\nFor the built-in `update-config` skill, the adapter changes only the known\nself-reference \"not Claude\" to \"not the assistant\" inside a complete\ngenerated skill-list reminder. Its configuration instructions, other\nskill descriptions, tools and caller text are preserved.\n\nClaude 5 can send runtime metadata in string-content `system` messages\ninstead of user-message reminders. The plugin adapts the known environment,\nmodel and configuration-skill metadata in that shape too, preserving the\nmessage role, environment values and session instructions.\nStartup hooks (`SessionStart` or `SubagentStart`, including additional\ncontext) and deferred-tool announcements may precede that environment\nblock. The adapter preserves the prefix verbatim and adapts the generated\nruntime context after it, including when folded into user text.\nAfter `/model` switches, Claude Code can send model-only system updates\nwithout the initial environment paragraph. Updates beginning with the known\nmodel paragraph and containing complete generated token metadata are\nadapted too, including accumulated switches when resuming a conversation.\nToken budgets, permission instructions and conversation history are preserved.\nThe same model-update adaptation covers updates that start with the complete\ngenerated `# Environment update` block after a working-directory change.\n\nClaude Code's generated compaction summaries also have a fixed opening\nthat Factory refuses. The adapter recognizes the two generated opening\nsentences and rephrases only the first in user strings and text blocks,\nincluding summaries without a `Summary:` label. The generated artifact\nprovenance marker and note stay verbatim. If the summary itself quotes any\nof the refused client phrases handled in tool output, the context after the\ntwo opening sentences is encoded as a JSON string with explicit decoding\ninstructions. Decoding restores the exact summary, transcript path and\ncontinuation instructions; context without those phrases stays verbatim.\nComplete generated reminders for restored Read calls and omitted files are\nadapted too. Read arguments and file paths are preserved; quoted or incomplete\nreminders are left alone.\nClaude Code (2.1.291 and later) also restores skills invoked before compaction\nas one generated reminder. Factory refuses that fixed opening, and the restored\nskill text can quote the same client phrases as tool output. A complete\nreminder has its opening sentence rephrased. When its skill text quotes a\nrefused phrase, that text is encoded as a JSON string with explicit skill-text\ndecoding instructions; decoding restores the skill text exactly. Skill text\nwithout those phrases stays verbatim inside the rephrased reminder. Pasted\nfragments and incomplete reminders are left untouched.\nClaude Code can also combine reminders into a token-prefixed `system` turn\nwithout the reminder wrappers. The adapter handles the known metadata\nparagraphs in that form, including skill-list updates and complete\ninvoked-skills reminders. A complete reminder is the fixed opening sentence\nfollowed by the complete `IMPORTANT:` paragraph; skill text then runs until\nthe next known attachment (a token marker, hook, restored Read, omitted-file\nnote, Read result, environment, model line, skill-list header, changed-file\nnote, agent-type list or MCP server instructions) or the end of the turn.\nNumbered file contents, token markers and SessionStart hook output stay.\nThe same adaptation applies when a translating gateway folds that complete\ntoken-prefixed block into a user message.\nStandalone skill updates can instead start with the generated skill-list\nheader and end with a token marker, for example when leaving auto mode.\nThat complete form receives the same adaptation while retaining the skill\ndescriptions and mode-change instructions.\nThe skill list can also come alone as a `system` message, with only its\nentries: no header, no reminder wrapper and no token marker, as text blocks\nor a string. A `system` message that opens with an entry gets the same\nchange to the known `update-config` line; everything else in it stays.\nWhen runtime notifications precede the skill update, the adapter recognizes\nthe complete skill-header and bullet-list paragraphs inside a token-terminated\nbundle. It preserves MCP connection errors, other notifications, mode updates\nand custom skill descriptions while adapting the known built-in description.\nAfter `/compact`, Claude Code also sends the files it restores and the\nruntime context as one turn that opens with an unwrapped restored-file note,\nRead call or complete invoked-skills reminder, with no token marker first.\nA complete skills reminder is recognized even when no files were restored\nand no environment or token paragraph follows it. A restored-file opening\nrequires the generated environment paragraph, a token marker or a complete\nskills reminder before any hook output. Each fixed paragraph (file notes,\nRead calls and results, skills, environment, model line) is adapted as in a\ntoken-prefixed bundle; everything else stays byte-for-byte. Quoted,\nincomplete and hook-owned forms are left alone.\n\nFactory can also refuse fixed client phrases quoted in tool results, such as\nthe identity/environment definitions printed when inspecting this plugin's\nsource, or the compaction opening embedded in a historical session JSONL\nrecord. Those text results are represented as JSON strings with explicit\ndecoding instructions and Unicode escapes for the fixed phrases. Decoding\nthe string recovers the exact original output, including quotes, backslashes\nand Unicode; the plugin does not delete the output or replace its identities\nwith different ones. Tool ids, cache/error markers and non-text blocks stay\nunchanged. Ordinary tool results are forwarded as before.\nThe same lossless encoding applies to restored or `@`-attached Read file text\nafter the exact `Result of calling the Read tool:` header, including complete\nreminder wrappers and announced runtime bundles. The generated header and\nwrapper stay intact. File text without a known refused phrase is unchanged.\nClaude Code's complete changed-on-disk notifications receive the same handling:\nonly the numbered file snippet is encoded, retaining its TAB or colon line\nseparators, hunk separators and truncation notice. The path and instructions\nabout respecting the current file stay verbatim. This covers wrapped user\nattachments and generated system bundles, including notifications before a\ntoken marker. Changed-file text supplied by hooks, quoted or incomplete\nnotifications, and notices that omit the snippet are left alone. Model and\nenvironment metadata after non-startup hooks retain their existing adaptation.\n\nUse magpie's Claude Code integration to select the Factory provider.\nmagpie manages the provider-specific client settings, including capability\nand permission configuration. Fields such as `safeguards` and\n`context_management` are forwarded for Factory to validate; the request\nadapter preserves them along with the other request options. One exception:\nFactory's streaming route refuses `context_management` (\"Extra inputs are\nnot permitted\") while its non-streaming route takes it, so a streamed\nrequest is sent without it. The server then clears nothing from the\ncontext; Claude Code's own compaction still runs.\n\nThe same metadata adaptation applies to `/messages` and\n`/messages/count_tokens`, so token counting sees the prompt used for\ninference. Serving the counting endpoint still depends on the host and\nupstream. Model and feature availability depend on the Factory account,\norganization region and upstream API. Connectivity has been verified with\nSonnet 4.6, Sonnet 5.5 and Opus 5.5. Two-turn Read tool calls with Claude\nCode's default tool set have been verified with Sonnet 4.6 and Sonnet 5.5,\nincluding Sonnet 5.5 selected through a routing group.\n\n## Tool schema compatibility\n\nFactory's Anthropic route rejects tool schemas with root-level `anyOf`,\n`oneOf` or `allOf`. The plugin nests those schemas under an internal\n`arguments` property instead of removing their branch constraints. It\nwraps examples and previous tool inputs too, then unwraps tool replies\nbefore returning them to OpenCode or magpie. Ordinary object schemas and\nOpenAI routes keep their existing behavior.\n\nLocal schema pointers are rebased to the nested schema; `$id` resources\nand anchors retain their resolution scope, and literal data is unchanged.\nRecursive schema resources\nwithout `$id` fail explicitly because nesting would change their scope.\nAffected streaming tool arguments are buffered until their content block\nis complete. Other events, tool ids, usage and upstream errors pass through;\nan incomplete or invalid argument envelope fails instead of being executed.\n"
+    },
+    "@magpie-community/opencode-grok-auth": {
+      "versions": {
+        "0.1.15": {
+          "file": "tgz/magpie-community-opencode-grok-auth-0.1.15.tgz",
+          "integrity": "sha512-5T17Cd61RbNnNJdcBqHdpVTuey2C+P+/hI+ZZVq+IiQDrr7Fc9/2YFhz3jGnMu+G0cyAdO2XW05LlQPRkhzVlw==",
+          "time": "2026-10-14T20:43:43.673Z",
+          "manifest": {
+            "name": "@magpie-community/opencode-grok-auth",
+            "version": "0.1.15",
+            "description": "OpenCode provider plugin: Grok (SuperGrok / X Premium+) through the Grok Build CLI's sign-in",
+            "type": "module",
+            "main": "./index.mjs",
+            "exports": "./index.mjs",
+            "files": [
+              "index.mjs",
+              "README.md"
+            ],
+            "keywords": [
+              "opencode",
+              "opencode-plugin",
+              "grok",
+              "xai",
+              "supergrok"
+            ],
+            "license": "MIT",
+            "repository": {
+              "type": "git",
+              "url": "git+https://github.com/magpie-community/plugins.git",
+              "directory": "packages/grok"
+            }
+          }
+        }
+      },
+      "latest": "0.1.15",
+      "readme": "# @magpie-community/opencode-grok-auth\n\nGrok with a SuperGrok or X Premium+ subscription, through the sign-in of\nxAI's [Grok Build CLI](https://x.ai/cli). Provider id: `grok`.\n\nIt needs Grok Build installed:\n\n```sh\ncurl -fsSL https://x.ai/cli/install.sh | bash          # macOS, Linux\nirm https://x.ai/cli/install.ps1 | iex                 # Windows\n```\n\nIt is found in the installer's folder (`GROK_BIN_DIR`, `GROK_HOME/bin`,\n`~/.grok/bin`), or on `PATH` when it lives under a `.grok` folder, so that\nanother program named `grok` isn't taken for it. Where the installer can't\nrun, such as a container without curl, put the binary in a folder of your\nown and set `GROK_BIN_DIR` to it. magpie installs Grok Build itself, as\nthe installer does, before a sign-in that needs it.\n\n## Sign in\n\n- **Sign in with Grok Build (device code)** runs `grok login --device-auth`\n  and opens the page it prints. Approve the sign-in there, and the CLI\n  finishes it.\n  - If the CLI isn't signed in yet, the sign-in goes to the CLI's own home\n    (`GROK_HOME`, else `~/.grok`), as if you had run `grok login`.\n  - If it is signed in, the sign-in goes to a home of this plugin's,\n    `$XDG_CONFIG_HOME/opencode-grok-auth/<random>` (else under\n    `~/.config`). Grok Build's own sign-in stays as it is.\n- **Use Grok Build's current sign-in** takes the account the CLI is\n  signed in to, with nothing to approve.\n- **Import CPA Grok account JSON** copies one enabled xAI OAuth account from\n  a CLIProxyAPI (CPA) account JSON file (CPA keeps it as\n  `~/.cli-proxy-api/xai-<email>.json`) into a private home for this plugin.\n  CPA and Grok Build rotate the same refresh token, so stop using that\n  account in CPA before importing it. The file is read, never rewritten.\n\n## Where the sign-in is kept\n\nThe CLI keeps the sign-in in its home, as `auth.json`. OpenCode (or\nmagpie) keeps where that home is, the token and its expiry. Importing a CPA\naccount writes only its translated xAI OAuth fields to a private home owned\nby this plugin; the selected CPA file is left unchanged.\n\nThe plugin reads `auth.json`; Grok Build refreshes the token, which changes\neach time. The plugin runs `grok models` in that home, so the CLI renews\nit, then reads it again:\n\n- magpie renews the token 5 minutes before it ends, through the plugin's\n  `auth.refresh`, once for the account and before its requests, models\n  and usage need it. magpie saves what the CLI gave.\n- OpenCode doesn't call that hook: there the token is renewed when it is\n  5 minutes from expiring, before a request.\n- The CLI runs once for a home at a time: a request or renewal that\n  comes while it runs waits for it and reads what it gave. A token the\n  CLI already renewed is taken as it is.\n- When the CLI no longer holds a sign-in in that home (`grok logout`),\n  the account has to be signed in again. When it couldn't renew a token\n  that has ended, magpie tries again later.\n\n## Requests\n\nRequests go to `https://cli-chat-proxy.grok.com/v1`, OpenAI's Responses\nAPI (`@ai-sdk/openai`), signed as the CLI signs them:\n\n- `Authorization: Bearer <token>`\n- `x-xai-token-auth: xai-grok-cli`\n- `x-grok-client-identifier: grok-shell`\n- `x-grok-client-mode: headless`\n- `x-grok-client-version` and `User-Agent: grok-shell/<version> (<os>; <arch>)`.\n  The version is 1.0.41, or the installed CLI's if it is newer.\n- `x-grok-model-override`: the request's model. A window suffix\n  (`grok-4.7@500k`) is the plain model (`grok-4.7`) here and in the body.\n- `x-grok-context-window`: the token count a suffixed model names\n  (`500000` for `@500k`). The plain id sends no such header and stays on\n  the default window.\n- `x-grok-conv-id`: the request's `prompt_cache_key`.\n\nThe backend turns away some of what a request may carry, so the plugin\nleaves these out:\n\n- tools of types it doesn't take (a freeform `apply_patch`, namespaces)\n- `external_web_access` on web search\n- a `tool_choice` naming a dropped type\n- a reasoning item's `\"content\": null`\n\nPlain Codex collaboration items (`agent_message`) reach Grok as user\nmessages, with their sender, recipient and content preserved. Sealed or\nunrecognized content stays unchanged; the plugin does not decrypt tasks.\n\n## Models\n\nGrok 4.7 until signed in. Signed in, the models are the ones the account\nlists at `/v1/models` (Responses models only), each with its reasoning\nefforts as variants.\n\n`context_window` is the default window and keeps the plain id, so a saved\n`grok-4.7` stays a 256k model. Each other size in `context_windows` is\noffered beside it, named `Grok 4.7 @ 500k` with id `grok-4.7@500k` and\nthat many tokens as its window. A request for it sends\n`x-grok-context-window: 500000`. The proxy serves up to its largest\nwindow either way and refuses past it; the header names the window the\ncaller asked to compact against. Pick `grok-4.7@500k` where a client\ncompacts at the advertised window, such as Claude Code.\n\n## Usage\n\nmagpie's card shows the credits of the current period\n(`/v1/billing?format=credits`): weekly for SuperGrok, with on-demand\nspending beside it when it has a cap.\n\nGrok's billing says nothing of a plan's rate limit, so a free account can\nread 0% used while its requests come back 429. After a 429 the card shows\na spent \"Rate limit\" window until the reset it named (`Retry-After`, or a\n`*ratelimit*reset*` header). When it named none, the window stays until a\nrequest goes through, or for 5 minutes.\n\nGrok Bot's separate allowance is shown by the [Cursor plugin](../cursor/README.md#usage).\nSign in there with the Cursor account linked in Grok Bot, including for\naccess through SuperGrok.\n"
+    },
+    "@magpie-community/opencode-kiro-auth": {
+      "versions": {
+        "0.1.11": {
+          "file": "tgz/magpie-community-opencode-kiro-auth-0.1.11.tgz",
+          "integrity": "sha512-eAXg5wvdfPzcR0xfOo6F9rHDt/ejhXHkqbZMywFwEpfXEnDggmdnbebyqajuoFNptfLCHuE8tlqNrYk9VHl/7w==",
+          "time": "2026-10-14T20:43:43.996Z",
+          "manifest": {
+            "name": "@magpie-community/opencode-kiro-auth",
+            "version": "0.1.11",
+            "description": "Kiro subscriptions (Free, Pro, Pro+, Power) in OpenCode and magpie",
+            "type": "module",
+            "main": "./index.mjs",
+            "exports": "./index.mjs",
+            "files": [
+              "index.mjs",
+              "README.md"
+            ],
+            "keywords": [
+              "opencode",
+              "opencode-plugin",
+              "magpie",
+              "kiro"
+            ],
+            "license": "MIT",
+            "repository": {
+              "type": "git",
+              "url": "git+https://github.com/magpie-community/plugins.git",
+              "directory": "packages/kiro"
+            }
+          }
+        }
+      },
+      "latest": "0.1.11",
+      "readme": "# @magpie-community/opencode-kiro-auth\n\nSigns in to a [Kiro](https://kiro.dev) subscription (Free, Pro, Pro+,\nPower) and makes its requests, in OpenCode and in magpie. Provider id:\n`kiro`.\n\n## Signing in\n\n- **Kiro (Google, GitHub, AWS Builder ID, IAM Identity Center)**: the Kiro\n  IDE's own sign-in.\n  - Kiro's page (`app.kiro.dev/signin`) sends the browser back to one of\n    the ports the IDE listens on (3128, 4649, 6588, 8008, 9091, 49153,\n    50153–53153) on `127.0.0.1`. While the IDE is signing in, those ports\n    may be busy.\n  - Google and GitHub come back with a code. Kiro's auth service trades it\n    for tokens.\n  - Builder ID and Identity Center come back with an AWS sign-in URL and\n    region. The plugin registers a client with AWS's OIDC service, sends\n    the browser to AWS, and trades the code AWS returns.\n  - The account is named by the email Kiro has for it (`Get-Usage-Limits`),\n    and its plan is read from the same call.\n  - A company's own identity provider (`external_idp`) is not supported\n    here. Sign in with `kiro-cli login` and use the next method instead.\n- **Kiro CLI's or Kiro IDE's sign-in**: uses the account kiro-cli is signed\n  in to, or else the Kiro IDE's. Nothing is copied. It is read each time\n  from where they keep it:\n  - kiro-cli: its SQLite database's `auth_kv` table.\n    - macOS: `~/Library/Application Support/kiro-cli/data.sqlite3`\n    - Linux: `~/.local/share/kiro-cli/data.sqlite3`\n    - Windows: `%APPDATA%\\kiro-cli\\data.sqlite3`\n  - The IDE: `~/.aws/sso/cache/kiro-auth-token.json`.\n\n  kiro-cli refreshes its own token first (`kiro-cli debug refresh-auth-token`).\n  A token the plugin refreshes itself is written back, so kiro-cli and the\n  IDE go on with it.\n- **Kiro API key (`ksk_…`)**: sent with `tokentype: API_KEY`. Its profile is\n  found with `GetProfile`.\n\nA browser sign-in is kept where OpenCode keeps sign-ins (`auth.json`; in\nmagpie, `plugin-auth.json`) as an `oauth` entry. The entry holds the\ntokens, the profile ARN, the region and, for AWS, the registered client.\nRefreshing such a sign-in:\n\n- magpie renews the token 10 minutes before it expires, through the\n  plugin's `auth.refresh`, once for the account and before its requests,\n  models and usage need it. magpie saves the new token. A failed renewal,\n  even one Kiro refused, doesn't mark the account: it is tried again.\n- OpenCode doesn't call that hook: there the token is refreshed 2 minutes\n  before it expires, before a request, and saved.\n- Either way, a token Kiro turns down (a 403) is refreshed and the request\n  tried once more.\n- Only one refresh runs at a time, magpie's renewal included, and a token\n  refreshed but not yet saved is used rather than spending the old refresh\n  token again.\n- kiro-cli's and the IDE's sign-ins aren't renewed by magpie: they are\n  refreshed before a request, as above, and written back.\n\nTokens are refreshed through:\n\n- Google/GitHub: through `prod.<region>.auth.desktop.kiro.dev/refreshToken`.\n- Builder ID/Identity Center: through AWS's `oidc.<region>.amazonaws.com/token`.\n\n## Requests\n\nKiro has no API OpenCode speaks. The models are declared on Anthropic's\nMessages (`@ai-sdk/anthropic`), and the plugin's `fetch` handles each\nrequest:\n\n- It sends the request to `runtime.<region>.kiro.dev/generateAssistantResponse`,\n  the API kiro-cli uses, with kiro-cli's headers. The region is the one the\n  profile ARN names.\n- It turns the request into a Kiro conversation:\n  - The system prompt goes at the head of the first message.\n  - Tool calls and results are paired: an unanswered call gets an error\n    result, and a result longer than 250,000 characters is cut.\n  - Tool ids Kiro wouldn't take are rewritten. A tool name over 64\n    characters (an MCP plugin's, in Claude Code) is sent shortened with a\n    hash and its calls come back under the full name.\n  - A tool's images (a screenshot, Codex's view_image) go with the\n    message that answers the call, as Kiro's tool results hold text alone.\n  - Only the latest images are sent.\n  - Tools the history used but the request doesn't offer are declared.\n- It turns the AWS event stream Kiro answers with back into Messages'\n  events (streamed) or one message. The reply includes text, thinking,\n  tool calls and usage. When Kiro reports only how full the context is,\n  input tokens are estimated from that.\n- Thinking (Claude models and Auto) is asked for the way kiro-cli asks, in\n  the prompt, with a budget: low 10k, medium 20k, high 30k, xhigh and max\n  50k (as magpie's built-in Kiro: #120). The\n  `<thinking>` block of the reply comes back as thinking.\n- Kiro's failures keep their meaning:\n  - input too long → 400\n  - no capacity → 503\n  - usage limit → 429\n  - throttling → \"rate limited\"\n\n## Models\n\nThe `config` hook declares `auto` (Kiro picks the model). Once signed in,\nthe `provider.models` hook replaces it with the account's own list from\n`List-Available-Models`, with the default first. Each model carries its\ncontext window, output limit and whether it takes images. Claude models\nand Auto have the thinking variants.\n\n## Not included\n\n- Usage and quota (credits, the monthly window).\n- Switching between several accounts. OpenCode keeps one sign-in per\n  provider.\n- Signing in with a company's own identity provider in the browser (use\n  kiro-cli's sign-in).\n- magpie's web-search stand-in for Kiro.\n"
+    },
+    "@magpie-community/opencode-mimo-auth": {
+      "versions": {
+        "0.1.9": {
+          "file": "tgz/magpie-community-opencode-mimo-auth-0.1.9.tgz",
+          "integrity": "sha512-HpmArQJc+vXVoz1ly1qKKcWyfgx7AzVaqG0ZT+Mc/3hWrrSEbo9xF1QfMx77WlGIVbP6AQefbvdd4ojRPcBkKw==",
+          "time": "2026-10-14T20:43:44.310Z",
+          "manifest": {
+            "name": "@magpie-community/opencode-mimo-auth",
+            "version": "0.1.9",
+            "description": "OpenCode provider plugin for Xiaomi MiMo: the MiMo app's Xiaomi-account sign-in, MiMo Pro and MiMo Flash",
+            "type": "module",
+            "main": "./index.mjs",
+            "exports": "./index.mjs",
+            "files": [
+              "index.mjs",
+              "README.md"
+            ],
+            "keywords": [
+              "opencode",
+              "opencode-plugin",
+              "xiaomi",
+              "mimo"
+            ],
+            "license": "MIT",
+            "repository": {
+              "type": "git",
+              "url": "git+https://github.com/magpie-community/plugins.git",
+              "directory": "packages/mimo"
+            },
+            "magpie": {
+              "icon": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjggMTI4Ij4KPGRlZnM+CjxzdHlsZT4KLmNscy0xIHsKZmlsbDogIzAwMDsKfQouY2xzLTEsIC5jbHMtMiB7CnN0cm9rZS13aWR0aDogMHB4Owp9Ci5jbHMtMiB7CmZpbGw6ICNmZmY7Cn0KPC9zdHlsZT4KPC9kZWZzPgo8cmVjdCBjbGFzcz0iY2xzLTEiIHdpZHRoPSIxMjgiIGhlaWdodD0iMTI4Ii8+CjxnPgo8cGF0aCBjbGFzcz0iY2xzLTIiIGQ9Ik0yNi43NCw0My42OWw4Ljc1LTEwLjg1aC00LjcybC02LjQ1LDcuOTYtNi40NS03Ljk2aC00LjcybDguNzUsMTAuODUuMDMuMDQtOS4xMSwxMS4yNGg1LjAzbDYuNDYtOC4yNiw2LjQ2LDguMjZoNS4wM2wtOS4xMS0xMS4yNC4wMy0uMDRaTTM5Ljc1LDMwLjM1Yy0xLjUyLDAtMi41MSwxLjEyLTIuNTEsMi40OHMuOTksMi40OCwyLjUxLDIuNDgsMi41MS0xLjEyLDIuNTEtMi40OC0uOTktMi40OC0yLjUxLTIuNDhaTTM3Ljc1LDU0Ljk3aDMuOTl2LTE3LjU3aC0zLjk5djE3LjU3Wk02MC4wMiw0NC4zNnYxMC42MWgtMy45OXYtMS43NmMtMS4xNiwxLjM2LTIuOTMsMi4xOS01LjY3LDIuMTktMS4yNiwwLTUuNDktLjcyLTUuOTYtNC45Ny0uNDUtNC4wNiwyLjktNi43OCw5LjE3LTYuNzhoMi40NWMwLTIuMTYtLjk5LTMuNDgtMy42OC0zLjUzLTIuMTktLjA0LTQuMDIuODItNS4zNywybC0xLjU3LTMuMDFjMi4wNC0xLjc3LDUuMjktMi44MSw4LjY4LTIuMzksNS41Ni42OCw1Ljk0LDUuMjgsNS45NCw3LjYzWk01Ni4wMiw0Ni45NGgtMS45NWMtNC4yMSwwLTUuOCwxLjM1LTUuNjUsMi44OS4xNCwxLjUsMS41MSwyLjE2LDMuMTgsMi4xNiwyLjg1LDAsNC40Mi0yLjc5LDQuNDItNC41NXYtLjQ5Wk04MC4xLDQ2LjEyYzAsNS4xNS0zLjUyLDkuMzgtOC45Miw5LjM4cy04LjkyLTQuMjQtOC45Mi05LjM4LDMuNTItOS4zOCw4LjkyLTkuMzgsOC45Miw0LjI0LDguOTIsOS4zOFpNNzYuMTEsNDYuMTJjMC0zLjY2LTIuMTctNS44MS00LjkzLTUuODFzLTQuOTMsMi4xNS00LjkzLDUuODEsMi4xNyw1LjgxLDQuOTMsNS44MSw0LjkzLTIuMTUsNC45My01LjgxWk0xMTAuNTgsNTQuOTdoMy45OXYtMTcuNTdoLTMuOTl2MTcuNTdaTTExMi41NywzMC4zNWMtMS41MiwwLTIuNTEsMS4xMi0yLjUxLDIuNDhzLjk5LDIuNDgsMi41MSwyLjQ4LDIuNTEtMS4xMiwyLjUxLTIuNDgtLjk5LTIuNDgtMi41MS0yLjQ4Wk0xMDEuMjcsMzYuNjNjLTIuNDksMC00LjMxLDEuMDMtNS4zLDMuMi0uOTQtMi4zMi0yLjg5LTMuMi00Ljc4LTMuMi0xLjcxLDAtMy45Ny43Ny00LjczLDIuODJ2LTIuMDVoLTMuOTF2MTcuNTdoMy45OXYtMTAuNDdjMC0xLjI5LjQyLTQuMTksMy4xNy00LjE5czMuMjEsMi44OSwzLjIxLDQuMTl2MTAuNDdoMy45OXYtMTAuNDdjMC0xLjI5LjQyLTQuMTksMy4yMS00LjE5czMuMTcsMi44OSwzLjE3LDQuMTl2MTAuNDdoMy45OXYtMTEuNDJjMC00LjU4LTIuNzQtNi45Mi02LjAzLTYuOTJaIi8+CjxnPgo8cGF0aCBjbGFzcz0iY2xzLTIiIGQ9Ik00NC41Nyw3NS45N3YxOS4zN2MwLDEuMDctLjg3LDEuOTMtMS45MywxLjkzcy0xLjkzLS44Ny0xLjkzLTEuOTN2LTE5LjM3YzAtMS4wNy44Ny0xLjkzLDEuOTMtMS45M3MxLjkzLjg3LDEuOTMsMS45M1oiLz4KPHBhdGggY2xhc3M9ImNscy0yIiBkPSJNMTQuNzcsODIuODJoMGMtMS4wNywwLTEuOTMuODctMS45MywxLjkzdjEwLjZjMCwxLjA3Ljg3LDEuOTMsMS45MywxLjkzaDBjMS4wNywwLDEuOTMtLjg3LDEuOTMtMS45M3YtMTAuNmMwLTEuMDctLjg3LTEuOTMtMS45My0xLjkzWiIvPgo8cGF0aCBjbGFzcz0iY2xzLTIiIGQ9Ik0zNi42LDc1Ljc3czAtLjA1LS4wMS0uMDhjMC0uMDQsMC0uMDctLjAyLS4xMSwwLS4wMy0uMDEtLjA2LS4wMi0uMDksMC0uMDMtLjAxLS4wNi0uMDItLjA5LDAtLjAzLS4wMi0uMDYtLjAzLS4wOS0uMDEtLjAzLS4wMi0uMDYtLjAzLS4wOS0uMDEtLjAzLS4wMy0uMDUtLjA0LS4wOC0uMDEtLjAzLS4wMy0uMDYtLjA0LS4wOS0uMDEtLjAzLS4wMy0uMDUtLjA0LS4wOC0uMDItLjAzLS4wMy0uMDYtLjA1LS4wOS0uMDItLjAzLS4wNC0uMDUtLjA2LS4wOC0uMDItLjAyLS4wMy0uMDUtLjA1LS4wNy0uMDQtLjA1LS4wOC0uMS0uMTMtLjE0aDBzLS4wOS0uMDktLjE0LS4xM2MtLjAyLS4wMi0uMDUtLjAzLS4wNy0uMDUtLjAzLS4wMi0uMDUtLjA0LS4wOC0uMDYtLjAzLS4wMi0uMDUtLjAzLS4wOC0uMDUtLjAzLS4wMi0uMDUtLjAzLS4wOC0uMDUtLjAzLS4wMS0uMDYtLjAzLS4wOS0uMDQtLjAzLS4wMS0uMDYtLjAzLS4wOS0uMDQtLjAzLS4wMS0uMDYtLjAyLS4wOC0uMDMtLjAzLS4wMS0uMDYtLjAyLS4xLS4wMy0uMDMsMC0uMDYtLjAxLS4wOC0uMDItLjAzLDAtLjA3LS4wMi0uMS0uMDItLjAzLDAtLjA2LDAtLjA5LS4wMS0uMDMsMC0uMDYtLjAxLS4xLS4wMS0uMDUsMC0uMTEsMC0uMTYsMCwwLDAtLjAyLDAtLjAzLDAtLjAxLDAtLjAyLDAtLjAzLDAtLjA1LDAtLjExLDAtLjE2LDAtLjAzLDAtLjA3LDAtLjEuMDEtLjAzLDAtLjA2LDAtLjA5LjAxLS4wNCwwLS4wNy4wMi0uMTEuMDMtLjAzLDAtLjA1LjAxLS4wOC4wMi0uMDMuMDEtLjA3LjAyLS4xLjA0LS4wMywwLS4wNS4wMi0uMDguMDMtLjAzLjAxLS4wNi4wMy0uMDkuMDQtLjAzLjAxLS4wNS4wMi0uMDguMDQtLjAzLjAyLS4wNi4wMy0uMDkuMDUtLjAyLjAxLS4wNS4wMy0uMDcuMDQtLjAzLjAyLS4wNi4wNS0uMS4wNy0uMDIuMDEtLjA0LjAzLS4wNi4wNC0uMDUuMDQtLjEuMDgtLjE0LjEzbC04LjU5LDguNTktOC41OS04LjU5Yy0uNzUtLjc1LTEuOTgtLjc1LTIuNzMsMGgwYy0uNzUuNzUtLjc1LDEuOTgsMCwyLjczbDkuOTYsOS45NmMuNzYuNzYsMS45OC43NiwyLjczLDBsNi42Ni02LjY2djE0LjczYzAsMS4wNy44NywxLjkzLDEuOTMsMS45M3MxLjkzLS44NywxLjkzLTEuOTN2LTE5LjM5YzAtLjA2LDAtLjEzLDAtLjE5WiIvPgo8cGF0aCBjbGFzcz0iY2xzLTIiIGQ9Ik01MC42LDgyLjgyYy0xLjA3LDAtMS45My44Ny0xLjkzLDEuOTN2MTAuNmMwLDEuMDcuODcsMS45MywxLjkzLDEuOTNzMS45My0uODcsMS45My0xLjkzdi0xMC42YzAtMS4wNy0uODctMS45My0xLjkzLTEuOTNaIi8+CjxwYXRoIGNsYXNzPSJjbHMtMiIgZD0iTTcyLjQ0LDc1Ljc3czAtLjA1LS4wMS0uMDhjMC0uMDQsMC0uMDctLjAyLS4xMSwwLS4wMy0uMDEtLjA2LS4wMi0uMDksMC0uMDMtLjAxLS4wNi0uMDItLjA5LDAtLjAzLS4wMi0uMDYtLjAzLS4wOS0uMDEtLjAzLS4wMi0uMDYtLjAzLS4wOS0uMDEtLjAzLS4wMy0uMDUtLjA0LS4wOC0uMDEtLjAzLS4wMy0uMDYtLjA0LS4wOS0uMDEtLjAzLS4wMy0uMDUtLjA0LS4wOC0uMDItLjAzLS4wMy0uMDYtLjA1LS4wOS0uMDItLjAzLS4wNC0uMDUtLjA2LS4wOC0uMDItLjAyLS4wMy0uMDUtLjA1LS4wNy0uMDQtLjA1LS4wOC0uMS0uMTMtLjE0aDBzLS4wOS0uMDktLjE0LS4xM2MtLjAyLS4wMi0uMDUtLjAzLS4wNy0uMDUtLjAzLS4wMi0uMDUtLjA0LS4wOC0uMDYtLjAzLS4wMi0uMDUtLjAzLS4wOC0uMDUtLjAzLS4wMi0uMDUtLjAzLS4wOC0uMDUtLjAzLS4wMS0uMDYtLjAzLS4wOS0uMDQtLjAzLS4wMS0uMDYtLjAzLS4wOS0uMDQtLjAzLS4wMS0uMDYtLjAyLS4wOC0uMDMtLjAzLS4wMS0uMDYtLjAyLS4xLS4wMy0uMDMsMC0uMDUtLjAxLS4wOC0uMDItLjAzLDAtLjA3LS4wMi0uMS0uMDItLjAzLDAtLjA2LDAtLjA5LS4wMS0uMDMsMC0uMDYtLjAxLS4xLS4wMS0uMDUsMC0uMTEsMC0uMTYsMCwwLDAtLjAyLDAtLjAzLDBoMHMtLjAyLDAtLjAzLDBjLS4wNSwwLS4xMSwwLS4xNiwwLS4wMywwLS4wNywwLS4xLjAxLS4wMywwLS4wNiwwLS4wOS4wMS0uMDQsMC0uMDcuMDItLjExLjAzLS4wMywwLS4wNS4wMS0uMDguMDItLjAzLjAxLS4wNy4wMi0uMS4wNC0uMDMsMC0uMDUuMDItLjA4LjAzLS4wMy4wMS0uMDYuMDMtLjA5LjA0LS4wMy4wMS0uMDUuMDItLjA4LjA0LS4wMy4wMi0uMDYuMDMtLjA5LjA1LS4wMi4wMS0uMDUuMDMtLjA3LjA0LS4wMy4wMi0uMDYuMDUtLjEuMDctLjAyLjAxLS4wNC4wMy0uMDYuMDQtLjA1LjA0LS4xLjA4LS4xNC4xM2wtOC41OSw4LjU5LTguNTktOC41OWMtLjc1LS43NS0xLjk4LS43NS0yLjczLDBoMGMtLjc1Ljc1LS43NSwxLjk4LDAsMi43M2w5Ljk2LDkuOTZjLjc2Ljc2LDEuOTguNzYsMi43MywwbDYuNjYtNi42NnYxNC43M2MwLDEuMDcuODcsMS45MywxLjkzLDEuOTNoMGMxLjA3LDAsMS45My0uODcsMS45My0xLjkzdi0xOS4zOWMwLS4wNiwwLS4xMywwLS4xOVoiLz4KPHBhdGggY2xhc3M9ImNscy0yIiBkPSJNOTAuNzQsOTIuOThjLTMuMDQsMS40Ni02LjguODktOS4yNy0xLjU3LTIuNDYtMi40Ni0zLjAzLTYuMjItMS41Ny05LjI3LjQtLjgzLjE0LTEuODItLjYtMi4zN2gwYy0uOTgtLjc0LTIuMzktLjM4LTIuOTIuNzMtMi4xMyw0LjQ5LTEuMjgsMTAuMDIsMi4zNCwxMy42NXM5LjE2LDQuNDgsMTMuNjUsMi4zNGMxLjExLS41MywxLjQ2LTEuOTQuNzMtMi45Mi0uNTUtLjczLTEuNTQtLjk5LTIuMzctLjZaIi8+CjxwYXRoIGNsYXNzPSJjbHMtMiIgZD0iTTk1LjcsNzcuMThjLTMuNjMtMy42My05LjE2LTQuNDgtMTMuNjUtMi4zNC0xLjExLjUzLTEuNDYsMS45NC0uNzMsMi45Mi41NS43MywxLjU0Ljk5LDIuMzcuNiwzLjA0LTEuNDYsNi44LS44OSw5LjI3LDEuNTcsMi40NiwyLjQ2LDMuMDMsNi4yMiwxLjU3LDkuMjctLjQuODMtLjE0LDEuODIuNiwyLjM3Ljk4Ljc0LDIuMzkuMzgsMi45Mi0uNzMsMi4xMy00LjQ5LDEuMjgtMTAuMDItMi4zNC0xMy42NVoiLz4KPC9nPgo8L2c+Cjwvc3ZnPg=="
+            }
+          }
+        }
+      },
+      "latest": "0.1.9",
+      "readme": "# @magpie-community/opencode-mimo-auth\n\nSigns in to **Xiaomi MiMo** with a Xiaomi account, the way the MiMo desktop\napp does, and makes its model requests. Provider id: `mimo-app`.\n\n## Sign-in\n\nOne way, **Xiaomi account**. The plugin opens Xiaomi's sign-in page\n(account.xiaomi.com's long-poll ticket). Sign in there, or scan its QR code\nwith the Xiaomi phone app. The plugin waits on the ticket until Xiaomi says\nthe account is in, so there's nothing to paste back.\n\nXiaomi's passToken then signs the account on at the MiMo server. The server\nsends the browser through account.xiaomi.com and back through its `/sts`,\nwhich sets the session cookies (`serviceToken`, `userId`, `cUserId`). An\naccount from Russia or India is moved to that region's server\n(`mimo-server-ru` / `mimo-server-in`). Everyone else stays on\n`mimo-server-sgp`.\n\n## Requests\n\nChat completions go to `https://mimo-server-<region>.xiaomimimo.com/api/route/chat/completions`\n(`@ai-sdk/openai-compatible`). Each request carries:\n\n- the session cookies, with no `Authorization` header\n- `X-Mimo-Source: mimocode-cli-free`\n- `X-Client-Version: 26.929.292248`\n- the app's User-Agent\n\n`mimo-auto`, the app's default model, is requested as `mimo-pro`.\n\nThe session is renewed with the passToken a day after it was issued.\nmagpie (0.1.684 and later) does it ahead of time through `auth.refresh`, ten\nminutes before that day is out (`refreshLead`), once for the account and\nbefore its requests, models and usage ask for it; a passToken Xiaomi no\nlonger takes marks the account for a new sign-in. The check before each\nrequest stays for OpenCode, which doesn't call `auth.refresh`, and one\nsign-on at a time serves both. A model\nrequest the server turns away (a 401) is answered as the server answered it,\nas magpie's built-in MiMo account did; reading usage renews the session once\nwhen the server turns it away. If the passToken no longer works, sign in\nagain.\n\n### An account with a Token Plan and no app membership\n\nThe app's server answers such an account's requests, every model, with\n403 `membership_required` (\"未开通会员或会员已到期，请订阅后使用\"). The\nplugin then asks the account's Token Plan instead. The passToken signs on\nat the open platform (platform.xiaomimimo.com, sid `api-platform`), which\ngives the plan's `tp-` key (`/tokenPlan/apiKey/raw`) and its endpoint\n(`openaiBaseUrl` of `/tokenPlan/apiKey`, e.g.\n`https://token-plan-cn.xiaomimimo.com/v1`). The request goes there with\n`Authorization: Bearer <tp- key>` and no cookies, with `mimo-pro` asked as\n`mimo-v2.6-pro` and `mimo-flash` as `mimo-v2.6-flash`. For an hour after,\nthe account's requests go straight to the plan; then the app is asked\nfirst again, in case a membership was bought. A key reset at the platform\n(the plan's 401) is read again on the next request. An account with no\nToken Plan, or a plan with no key yet (the platform's Token Plan page\nmakes one), gets the app's 403 as it is.\n\n## Usage\n\nmagpie's Usage card shows the MiMo app's plan and its week's allowance.\nA Token Plan bought at the open platform (platform.xiaomimimo.com) is a\nplan of its own, spent by its `tp-` API key at\n`token-plan-<region>.xiaomimimo.com`. The same passToken signs on at the\nplatform (sid `api-platform`), so the card shows the Token Plan too. With\nan app plan, its credits are an aside beside the week's allowance: this\naccount's requests go to the app. With no app plan, the Token Plan is the\ncard's plan and its credits are the account's allowance, since its\nrequests go to the plan (above).\n\n## Where the sign-in is kept\n\nIn OpenCode's `auth.json`, or magpie's `plugin-auth.json`, as an OAuth sign-in:\n\n- `refresh`: the Xiaomi account as JSON (`userId`, `cUserId`, `passToken`, `deviceId`, `region`, `base`)\n- `access`: the session cookies as JSON\n- `expires`: when the session is renewed\n- `accountId`: the Xiaomi user id\n\n## Models\n\n| Model | Name | Context | Output | Input |\n|---|---|---|---|---|\n| `mimo-pro` | MiMo Pro | 1,000,000 | 128,000 | text, image |\n| `mimo-flash` | MiMo Flash | 1,000,000 | 128,000 | text, image |\n"
+    },
+    "@magpie-community/opencode-minimax-auth": {
+      "versions": {
+        "0.1.1": {
+          "file": "tgz/magpie-community-opencode-minimax-auth-0.1.1.tgz",
+          "integrity": "sha512-5Ye237wV+re+7g5d4uwaEEpjykJaSKV9GoGe4o8kPabVWAadWUb6KGCLnB4GEVIF64nurW5TbQ7zSz0zAeCQEA==",
+          "time": "2026-10-14T20:43:44.626Z",
+          "manifest": {
+            "name": "@magpie-community/opencode-minimax-auth",
+            "version": "0.1.1",
+            "description": "OpenCode provider plugins for MiniMax Code accounts: their credits and M Plan, China (minimax-code) and international (minimax-code-global), with MiniMax Code's own device sign-in",
+            "type": "module",
+            "main": "./index.mjs",
+            "exports": "./index.mjs",
+            "files": [
+              "index.mjs",
+              "README.md"
+            ],
+            "keywords": [
+              "opencode",
+              "opencode-plugin",
+              "minimax",
+              "mcode",
+              "minimax-code"
+            ],
+            "license": "MIT",
+            "repository": {
+              "type": "git",
+              "url": "git+https://github.com/magpie-community/plugins.git",
+              "directory": "packages/minimax"
+            }
+          }
+        }
+      },
+      "latest": "0.1.1",
+      "readme": "# @magpie-community/opencode-minimax-auth\n\nSigns in to MiniMax Code (mcode) accounts so their credits and M Plan can be\nused. That covers the free credits and the daily check-in's credits. There is\none provider for each of MiniMax's two sites:\n\n| Provider id | Site | API |\n|---|---|---|\n| `minimax-code` | MiniMax Code, China (minimax.cn / minimaxi.com) | `https://agent.minimax.cn/mavis/api/v1/llm/v1` |\n| `minimax-code-global` | MiniMax Code, international (minimax.io) | `https://agent.minimax.io/mavis/api/v1/llm/v1` |\n\nThe package exports `MiniMaxCodeAuthPlugin` (`minimax-code`) and\n`MiniMaxCodeGlobalAuthPlugin` (`minimax-code-global`).\n\n## Risk\n\nRead this before you use the package:\n- **The credits are for MiniMax's services.** MiniMax gives them for use in\n  MiniMax Code, and its terms decide where else they may be used. This\n  package uses them from other agents. MiniMax hasn't approved that.\n- **The risk to the account is yours.** MiniMax may limit, suspend or close\n  an account that uses them this way.\n- **This is a community package.** It has nothing to do with MiniMax.\n\n## Signing in\n\nYou sign in with MiniMax Code's own device sign-in: the same OAuth device\nflow, PKCE S256 and client `mcode-public` that `mcode /login` uses.\n- magpie opens MiniMax's page and shows the code to confirm there.\n- The plugin then waits for the sign-in and finishes by itself.\n\nMiniMax Code's own sign-in is never read or changed. That is\n`~/.minimax/auth/…`, so signing in here doesn't sign `mcode` out.\n\nThe sign-in is kept as an OpenCode `oauth` auth:\n- what it holds: the access and refresh tokens, their expiry, and the\n  MiniMax user id and email;\n- OpenCode keeps it in `auth.json`;\n- magpie keeps it in `plugin-auth.json`.\n\nEach account signs in on its own, so magpie can hold several and switch\nbetween them.\n\nRefreshing:\n- MiniMax spends a refresh token once. Sent a second time it is\n  `invalid_grant`, which signs the account out, so the plugin never sends\n  one twice.\n- magpie renews the token ten minutes before it ends, through the plugin's\n  `auth.refresh`, once for the account and before its requests, models and\n  usage need it. OpenCode doesn't call that hook: there the access token is\n  refreshed two minutes before it ends, before a request. Either way the\n  new token is saved.\n- When MiniMax turns the token away (HTTP 401), the request goes again with\n  a newer token if one was saved meanwhile, else after a refresh.\n- Only one refresh runs at a time for an account. Requests that arrive\n  meanwhile wait for it and use its token. When saving the new token\n  fails, the plugin keeps it in memory and goes on with it, rather than\n  with the spent one on disk.\n- A refresh token someone else spent first (another magpie process) isn't a\n  sign-out when the new one they saved is there: that one is used.\n- The account counts as signed out only when MiniMax answers the refresh\n  with `invalid_grant` (HTTP 400). Any other failure keeps the sign-in, and\n  the current token is used while it lasts.\n\n## Requests\n\nChats are Anthropic messages (`@ai-sdk/anthropic`) sent to\n`<API>/messages`. Each one carries MiniMax Code's headers:\n- `Authorization: Bearer <access token>`;\n- `x-api-key: sk-xxx`, the placeholder key MiniMax Code gives its SDK;\n- `User-Agent: MiniMaxAgent`;\n- `X-Mavis-Agent-Id: main`;\n- `X-Mavis-Timezone-Offset`;\n- `X-Mavis-Session-Id`. This is the conversation's id when magpie or\n  OpenCode passes one, and a fixed id for the plugin's run otherwise.\n\nA refusal that says the credits or quota ran out goes on as a 429. The 402,\n403 or 429 statuses count, when the body says so. That way magpie can move\nthe conversation to another account.\n\n## Models\n\nWhen you are signed in, the models come from MiniMax Code's live model\nconfig (`GET /mavis/api/v1/models`). The list includes each model's context,\nimage input and thinking options. If the live list doesn't answer, this\nbuilt-in list is used instead:\n\n| Model | Context | Images | Reasoning levels (variants) |\n|---|---|---|---|\n| MiniMax-M3.1-Flash-Preview | 512K | yes | low, medium, high, xhigh, max |\n| MiniMax-M3 | 512K | yes | none, high |\n| MiniMax-M2.7 | 200K | no | — (always thinks) |\n| MiniMax-M2.7-highspeed | 200K | no | — (always thinks) |\n\nVariants map to what MiniMax Code sends:\n- a level is adaptive thinking at that effort, which becomes\n  `output_config.effort`;\n- `none` turns thinking off.\n\n## Usage\n\nThe usage card shows:\n- the credits left;\n- the plan: Free, or the M Plan's tier and when it ends;\n- for an M Plan, its windows (5 hours, 7 days, and any model's own) from\n  `coding_plan/remains`.\n\nThese are read the way MiniMax Code reads them, with its signed account API.\n\n## Not here\n\n- **No check-in.** The package never claims the daily check-in's credits.\n  Check in from MiniMax Code or MiniMax's site.\n- **No sign-out.** Signing out doesn't revoke the token on MiniMax's side.\n"
+    },
+    "@magpie-community/opencode-qoder-auth": {
+      "versions": {
+        "0.2.15": {
+          "file": "tgz/magpie-community-opencode-qoder-auth-0.2.15.tgz",
+          "integrity": "sha512-XwEfOaJkCYF30QKxmV0+5sxYEUHM6XmMdvZaNPC11U7ppxOjjDsi0zas5TcDtP/Wu+5g/sHBXo64VUVgIpJtOA==",
+          "time": "2026-10-14T20:43:45.573Z",
+          "manifest": {
+            "name": "@magpie-community/opencode-qoder-auth",
+            "version": "0.2.15",
+            "description": "Qoder subscriptions in OpenCode and magpie: Qoder (qoder.com) and Qoder CN (qoder.cn)",
+            "type": "module",
+            "main": "./index.mjs",
+            "exports": "./index.mjs",
+            "files": [
+              "index.mjs",
+              "README.md",
+              "LICENSE-CLIProxyAPI"
+            ],
+            "keywords": [
+              "opencode",
+              "opencode-plugin",
+              "magpie",
+              "qoder",
+              "qoder-cn"
+            ],
+            "license": "MIT",
+            "repository": {
+              "type": "git",
+              "url": "git+https://github.com/magpie-community/plugins.git",
+              "directory": "packages/qoder"
+            }
+          }
+        }
+      },
+      "latest": "0.2.15",
+      "readme": "# @magpie-community/opencode-qoder-auth\n\nYour [Qoder](https://qoder.com) subscription in OpenCode and\n[magpie](https://usemagpie.ai). The package serves Qoder's two sites, whose\naccounts exist only on their own:\n\n| Provider id | Site | Accounts | Plugin export |\n|---|---|---|---|\n| `qoder` | qoder.com (international) | Google, GitHub or email | `QoderAuthPlugin` |\n| `qoder-cn` | qoder.cn ([Qoder CN](#qoder-cn)) | Alibaba Cloud or phone number | `QoderCNAuthPlugin` |\n\nWhat follows is about `qoder`. Qoder CN works the same way on its own\nhosts; [its section](#qoder-cn) says what differs.\n\n## Sign-in\n\n**Sign in with Qoder** is the sign-in Qoder's desktop client uses:\n\n1. A PKCE device flow opens qoder.com's account page.\n2. openapi.qoder.sh is polled every 2 s until you authorize, for at most\n   15 minutes.\n3. The device token is traded for a job token, and the account's email and\n   name are read.\n\nWhat is kept: the job token, its refresh token and expiry, the uid, the\ndevice token and a machine id made for this sign-in. OpenCode keeps them in\n`auth.json`; magpie keeps them in `plugin-auth.json`.\n\nRefreshing:\n- Qoder spends a refresh token once, so the plugin never sends one twice.\n- magpie renews the job token 10 minutes before it runs out, through the\n  plugin's `auth.refresh`, once for the account and before its requests,\n  models and usage need it; magpie saves the new pair. OpenCode doesn't\n  call that hook: there the job token is refreshed 5 minutes before it runs\n  out, before a request, and the new pair is saved straight away.\n- Only one refresh runs at a time. A request that reads the sign-in before\n  magpie saved a renewal uses the renewed pair, and a renewal handed a pair\n  a request already spent gives what that request got.\n- The device token, which reads usage, has no end on record: it is rotated\n  when Qoder refuses it. On a [Qoder CN](#qoder-cn) device-token account it\n  is the chat token too, and is renewed as above.\n- When Qoder refuses a refresh (401 or 403), the account needs signing in\n  again. Any other failure is tried again later.\n\n## Requests\n\nQoder serves its models on the API its client talks to:\n`api3.qoder.sh/algo/api/v2/service/pro/sse/agent_chat_generation`. The\nplugin's `fetch` takes the chat completion OpenCode sends and does the rest\nitself.\n\n**Writing the request**\n\n- It writes the chat completion as Qoder's request:\n  - Qoder's own system line comes before yours.\n  - Messages become text and image blocks.\n  - Tool calls and results become OpenAI tool turns. Images a tool returned\n    follow in a user turn.\n  - Your tools become Qoder's native function tools.\n  - The model's own configuration from Qoder's list goes with it.\n- It picks the reasoning effort from the model's own levels:\n  - The nearest level to the one asked, the higher one on a tie.\n  - The model's default when none is asked.\n  - The lowest level for \"none\", when the model can't turn thinking off.\n- It picks the context window (`context_length`) from the model's own\n  windows (Qoder's Context setting: 200K, 400K, 1M): the default while the\n  request fits it, else the smallest that holds it, else the largest. A\n  larger window may cost more, so it is asked for only when needed.\n- It encodes the body with the client's codec and signs the call with the\n  client's COSY envelope. The envelope carries:\n  - the account, AES-encrypted, with the key wrapped by Qoder's RSA key;\n  - an MD5 signature;\n  - the machine id and the client's headers.\n\n**Reading the reply**\n\n- Qoder's SSE comes back as a chat completion, streamed or not, with\n  reasoning and usage.\n- Tool calls Qoder writes as XML or JSON in its text become tool calls.\n  Tool calls it sends the OpenAI way keep Qoder's id.\n\n**Errors**\n\n| What Qoder says | What the request returns |\n|---|---|\n| A refused sign-in (no code, or code 105) | 401 |\n| A quota (codes 110, 112–119, 122) | 429 |\n| Busy or queued for the model (code 10605) | 503, with `Retry-After` from Qoder's `retryAfterSeconds` (30s when it gives none); the sign-in is untouched |\n| A refusal of the request itself (codes 406, 416, 430, 80411, 80412, 100400–100403) | 400, with Qoder's words |\n| A failure before the answer starts | Qoder's status |\n| A failure after the answer has started | The stream ends with an error |\n\n## Models\n\nThe `provider.models` hook reads the account's own list, as Qoder's client\nasks for it (`/algo/api/v2/model/list`). It keeps the enabled models of the\nlisting's `app` scene, the list Qoder's app shows and the one a request\nnames (`session_type: \"app\"`), and adds any model only the `chat` scene\nstill lists after the model it follows there, so a model picked before\nstays served (since 0.2.13, #97: the app listed Fast, 0.8×, where chat\nlists Performance, 1.1×). It leaves out \"auto\" and \"default\", which route\ninside Qoder. It takes\neach model's reasoning levels from its `thinking_config`, and its context\nfrom its `context_config`: the largest window it offers (Qoder's docs\ngive Qwen3.8-Flash 200K, 400K and 1M), not `max_input_tokens` (180K\nthere), which is only what a request naming no window gets. A model listed\nwith no windows keeps `max_input_tokens`.\n\nThe `config` hook declares the list as it was on 2026-09-30, with the\napp's Fast from 2026-10-12:\n\n- Ultimate, Fast, Performance, Efficient\n- Sonus, Cantus\n- Qwen3.8-Max, Qwen3.8-Flash, Qwen3.7-Max, Qwen3.7-Plus\n- Kimi-K3, Kimi-K2.8-Preview\n- GLM-5.3, GLM-5.3-Flash\n- DeepSeek-V4-Pro, DeepSeek-Flash\n- MiniMax-M3\n\nEvery model speaks chat completions (`@ai-sdk/openai-compatible`).\n\n## Qoder CN\n\n`qoder-cn` is for accounts on [qoder.cn](https://qoder.cn), the China site.\nThose accounts sign in with Alibaba Cloud or a phone number and can't sign\nin through `qoder`. Qoder CN speaks the same protocol as qoder.com:\n\n- the same device flow, poll, job token and refresh paths;\n- the same COSY envelope and body codec;\n- the same model list, chat and usage paths.\n\nOnly the hosts and the sign-in's client id differ. The plugin uses the ones\nQoder CN's own CLI builds in for its `cn` build (`@qodercn-ai/qoderclicn`\n1.1.65):\n\n| | `qoder` | `qoder-cn` |\n|---|---|---|\n| Sign-in page | qoder.com | qoder.cn |\n| Accounts: poll, tokens, user info, usage | openapi.qoder.sh | openapi.qoder.com.cn |\n| Models and chat | api3.qoder.sh | gateway.qoder.com.cn |\n| Device-flow client id | Qoder's desktop client's | Qoder CN's CLI's (production) |\n| `redirect_uri` on the sign-in page | `qoder-app://` | none, as the CLI sends |\n\nQoder CN's CLI chats with the device token itself and never makes a job\ntoken. The plugin asks qoder.cn for a job token first, as it does on\nqoder.com. If qoder.cn refuses it (a 4xx), the account works the way the\nCLI does:\n\n- the device token signs the model calls;\n- it is renewed with `/api/v1/deviceToken/refresh`, the chat and account\n  tokens being one pair;\n- a refused renewal (401 or 403) means signing in again.\n\nUntil you sign in, the `config` hook declares the tiers Qoder CN's CLI names\n(Ultimate, Performance, Efficient, Lite). Once you are signed in, the\naccount's own list from gateway.qoder.com.cn replaces them.\n\nNeither magpie's built-in Qoder CN nor this plugin has been checked against\nevery kind of qoder.cn account. If a sign-in or a chat fails, please open\nan issue with the error.\n\n### Enterprise VPC\n\nA Qoder CN enterprise on its own VPC instance signs in with **Sign in with\nQoder CN Enterprise (VPC)** (since 0.2.8). It asks for the instance: its\nname (`acme`) or one of its addresses (`acme.vpc.qoder.com.cn`,\n`https://acme.vpc.qoder.com.cn`). Only https and hosts under\n`vpc.qoder.com.cn` are taken.\n\nThe account then uses the instance's own hosts, as Qoder CN's CLI\n(`@qodercn-ai/qoderclicn` 1.1.64) does once a VPC instance is set. The\npaths, client id and protocol are the public ones:\n\n| | Public Qoder CN | VPC instance `acme` |\n|---|---|---|\n| Sign-in page | qoder.cn | acme.vpc.qoder.com.cn |\n| Accounts: poll, tokens, user info, usage | openapi.qoder.com.cn | acme-openapi.vpc.qoder.com.cn |\n| Models and chat | gateway.qoder.com.cn | acme-gateway.vpc.qoder.com.cn |\n\n- The instance is kept with the account, so its refreshes, models, usage\n  and check-in go to the instance too. An account kept with an instance\n  that isn't one is asked to sign in again; it is never sent to the public\n  hosts.\n- The account is named `<email> (<instance>)`, so it is listed apart from\n  the same person's public account.\n- An enterprise's usage shows as the Enterprise plan.\n- **Sign in with Qoder CN** is unchanged and still the first way. An\n  account signed in without an instance works as before.\n\nThe hosts and reply shapes come from a real VPC account's report\n(yetone/magpie#312). This plugin has not been tried with a VPC account.\n\n## Daily check-in\n\nQoder gives credits for a daily claim (the Qoder client's campaign\n`CLAIM_BENEFIT`, 100 Credits a day as reported), on both sites. magpie can\nclaim it for each account when its Qoder check-in switch is on\n(Settings). It asks these pages through this plugin's fetch (since 0.2.7),\nwhich sends them as the account, on the device token (`Bearer`,\n`Cosy-ClientType: 10`) as usage is read; a refused device token is\nrotated once and the page asked again.\n\nInternational campaigns also need Qoder's native device identity:\n`Cosy-MachineToken` and `Cosy-MachineType`. Without them, the server can\nreturn HTTP 200 but omit the daily claim. The plugin reads them from\nQoder's own `runtime-info` helper for the signed-in uid, sharing an\nin-flight read and caching it in memory for an hour. The same identity\ngoes on the list, the claim and a device-token retry; it is not saved in\nthe account's credentials.\n\n- Install Qoder desktop, or sign in to Qoder CLI once, to make its native\n  runtime available. The plugin finds the desktop's `resources/umid`\n  (`Qoder.app` on macOS, `%LOCALAPPDATA%\\Programs\\Qoder` on Windows,\n  `/opt/Qoder` on Linux) or the runtime the CLI caches in `~/.qoder/.bin`\n  (`runtime-info-<platform>-<arch>-*` on macOS and Linux,\n  `umid-win32-x64-*\\runtime-info.exe` on Windows; `QODER_CONFIG_DIR`,\n  `QODER_CLI_HOME` and `QODER_CONFIG_DIR_NAME` move it as they move the\n  CLI's folder).\n- For another installation location, set `QODER_RUNTIME_INFO` to the\n  absolute path of Qoder's installed `runtime-info` executable\n  (`runtime-info.exe` on Windows), with its accompanying SDK files.\n- A missing helper or invalid identity is an error, rather than a false\n  \"no activity\" result. Qoder CN keeps its existing requests and does\n  not need this local helper.\n\n- **List:** `GET <openapi>/sash/api/v1/me/campaigns`: `campaigns[]` with\n  `campaignId`, `actionType`, `claimStatus` (`CLAIMABLE`, `CLAIMED`),\n  `startAt`, `endAt`, `benefit.amount`.\n- **Claim:** `POST <openapi>/sash/api/v1/me/campaigns/{id}/claim`, body\n  `{}`: `status` `CLAIMED` (or under `data`).\n- `<openapi>` is `openapi.qoder.sh` (Qoder) or `openapi.qoder.com.cn`\n  (Qoder CN). Other pages on those hosts are still refused.\n\nTaken from [wallechfox/qoder-checkin](https://github.com/wallechfox/qoder-checkin),\nwhich a user reports works, and Qoder desktop 0.4.3's campaign requests.\nInternational campaign discovery was checked with a real account on\n2026-10-08: the native identity exposed the claimable 100 credits, and\nomitting either header hid them. This verification only queried the\nactivity; a live claim was not performed.\n\n## Not here\n\n- Qoder's usage and quota display.\n- Several accounts at once.\n- magpie's web-search stand-in.\n\n## Credits\n\nThe protocol (endpoints, COSY envelope, body codec and device flow) comes\nfrom [CLIProxyAPI](https://github.com/ufec/CLIProxyAPI)'s Qoder support, by\nway of magpie. Its MIT license is in `LICENSE-CLIProxyAPI`.\n"
+    },
+    "@magpie-community/opencode-trae-auth": {
+      "versions": {
+        "0.2.13": {
+          "file": "tgz/magpie-community-opencode-trae-auth-0.2.13.tgz",
+          "integrity": "sha512-RwL2AmNfOnP02znSgTD4oefMAy9P9SXFyI97qB+H+T65daXGciw2wNJuWD6svbFFD4vCMx6ZvbhOsXO4/YOy0w==",
+          "time": "2026-10-14T20:43:46.508Z",
+          "manifest": {
+            "name": "@magpie-community/opencode-trae-auth",
+            "version": "0.2.13",
+            "description": "OpenCode provider plugins for Trae: Trae CN (trae.cn) and Trae Global (trae.ai), free tier included, with Trae's own browser sign-in",
+            "type": "module",
+            "main": "./index.mjs",
+            "exports": "./index.mjs",
+            "files": [
+              "index.mjs",
+              "README.md"
+            ],
+            "keywords": [
+              "opencode",
+              "opencode-plugin",
+              "magpie",
+              "trae",
+              "trae-cn",
+              "trae-global",
+              "bytedance"
+            ],
+            "license": "MIT",
+            "repository": {
+              "type": "git",
+              "url": "git+https://github.com/magpie-community/plugins.git",
+              "directory": "packages/trae"
+            }
+          }
+        }
+      },
+      "latest": "0.2.13",
+      "readme": "# @magpie-community/opencode-trae-auth\n\nTwo providers, one package: **Trae CN** (trae.cn, ByteDance's AI IDE, provider\nid `trae-cn`) and **Trae Global** (trae.ai, the international deployment,\nprovider id `trae-global`). Each signs in with its own Trae account, the way\nthe IDE does, and makes its model requests. The free tier works as well.\n\nThe two are separate services — different domains, a different client's\ncatalog, barely overlapping model lists — so they are two providers rather\nthan a setting. They share one implementation: the request, stream and\ntool-call machinery is the same code, and each realm is a table (hosts,\nclient, versions, usage page, fallback models, error codes) in `index.mjs`.\nA fix to that machinery reaches both.\n\n| Provider id | Signs in to | Endpoints |\n|---|---|---|\n| `trae-cn` | Trae CN (trae.cn) | `api.trae.cn`, `trae-api-cn.mchost.guru` |\n| `trae-global` | Trae international (trae.ai) | `growsg-normal.trae.ai`, `coresg-normal.trae.ai` (SG) / `coreva-normal.trae.ai` (US) |\n\n> **Experimental (both).** The CN protocol was worked out from two\n> open-source relays, [wangqi233/trae2api](https://github.com/wangqi233/trae2api)\n> and [autumnsentiment/Trae2api-cn](https://github.com/autumnsentiment/Trae2api-cn),\n> and the international one from the same relays' realm table. Neither has\n> been run against a real account here: Trae CN has not been tried at all, and\n> Trae Global has been tried on one Free account in the SG region only — no\n> Pro and no US account. Paid-account behaviour (which models a plan lists,\n> what its allowance shows) is implemented from the interface's shape, not\n> confirmed on a live one. If something fails, open an issue and include the\n> error magpie shows.\n\n## Sign-in\n\nOne way per provider, **Trae CN account (browser)** or **Trae Global account\n(browser)**. The plugin opens that realm's authorization page\n(`www.trae.cn/authorization` or `www.trae.ai/authorization`, the IDE's client\n`ono9krqynydwx5`). Sign in there and allow the sign-in; the page then sends the\nbrowser back to a callback on `http://127.0.0.1:<port>/authorize` — it accepts\nno other kind of callback. The callback carries the account's Cloud-IDE-JWT,\nrefresh token and account. Nothing needs pasting back.\n\nAn account of one realm does not sign in to the other: trae.cn's accounts are\nnot trae.ai's.\n\nAt sign-in the plugin creates the account's device and names it to the\nauthorization page: `device_id` (19 digits) and `machine_id` (32 hex). Every\nrequest then sends that same device. The relays saw requests dropped when the\ndevice was new each time.\n\n### Enterprise (SaaS) accounts\n\nSince 0.2.10 the authorization page also offers Trae's enterprise (SaaS / SSO)\nsign-in; before, the plugin asked the page to hide it (`hide_saas_login`), so\nan enterprise subscription could only sign in as a personal account. A host\nthe sign-in names for the account is kept when it is an https host on Trae's\nown domains (`trae.cn`, `trae.ai`, `mchost.guru`): a model host other than the\nconsumer site's own (`www`, `api`, `grow…`) takes the account's model\nrequests, and a token host the callback names (`authHost`) takes its\nrenewals. Any other host is ignored and the consumer hosts are used, as for a\npersonal account, which is unchanged. The account's tenant and login-type\nfields are kept with the sign-in; nothing sends them.\n\n**Not tried with a real enterprise account.** Which hosts and fields an\nenterprise sign-in sends back is not known yet; if yours doesn't work, open an\nissue with what the sign-in page showed.\n\n### The international realm's region\n\nTrae Global has two deployments. The sign-in's `AIRegion` (or a US auth host\nsuch as `api-us-east.trae.ai`) selects the US one; anything else uses the SG\none. The US account's model requests go to `coreva-normal.trae.ai` and its\nusage page to `api-us-east.trae.ai`; the SG account uses\n`coresg-normal.trae.ai` and `api-sg-central.trae.ai`. Nothing has to be\nconfigured: the region rides in the saved sign-in.\n\n## Requests\n\nChat completions (`@ai-sdk/openai-compatible`) are translated for the IDE\nagent's `POST https://trae-api-cn.mchost.guru/api/agent/v3/llm_utils_chat`:\n\n- **Request:**\n  - The messages go as `{role, content: [{type: \"text\", text}]}`.\n  - The model goes as `config_name` and `model`, and as `model_name` the\n    `__dev` model the function's list names for it, when it names one.\n  - The function is the one whose model list has the model, the first that\n    names a `__dev` model for it (in the order `chat_v3`, the classic IDE's;\n    `solo_work_lite`, SOLO's Work mode; `solo_agent`, the TRAE agent's;\n    `solo_agent_lite`). If Trae answers 4001, 4023 or 1005, the plugin tries\n    the others once and remembers which one worked.\n  - `session_id` is the conversation's, as the IDE keeps one per conversation:\n    the session magpie (or OpenCode) names the request by, else the chat's\n    first user message, which every later turn repeats, together with the\n    account the request is made as. Trae counts a conversation by it, so a\n    fresh one per request made one user send that takes several steps (a tool\n    result sent back, a retry, another function answering) count as a\n    conversation of its own — several rows in the usage detail, each under no\n    title. One conversation answered by two accounts (magpie failing over, or\n    rotating, inside it) is named twice then, as two conversations, so Trae\n    never reads one account's conversation as another's; that costs the two\n    halves of such a conversation their single row. `request_id` is the\n    request's own, fresh on every one.\n- **Headers:** TRAE SOLO CN 0.1.69's (`x-ide-version`/`x-app-version`\n  0.1.69, version code 20260917; Trae offers a model only to clients new\n  enough for it): `Authorization: Cloud-IDE-JWT …`, `X-Cloudide-Token`,\n  `x-app-id`, the device headers and `x-uid`.\n- **Answer:** Trae always answers in its own SSE events:\n  - `output` gives `response`/`content` and `reasoning_content`/`reasoning`.\n    Text under `message`, `delta` or an event with no name is the answer's\n    too.\n  - `token_usage`, `done` and `error` mark usage, the end and failures.\n    What `token_usage` says the prompt cache read and wrote\n    (`cache_read_input_tokens`, `cache_creation_input_tokens`) goes on under\n    those names, and `reasoning_tokens` as\n    `completion_tokens_details.reasoning_tokens`.\n    `done`'s `finish_reason` `length`/`max_tokens` is OpenAI's `length`.\n  - Queue events are ignored.\n  - A `{\"reasoning_content\": …}` object written into the text is reasoning,\n    and reasoning Trae sends again is sent once.\n\n  The plugin turns these into an OpenAI stream or a single body. A reply\n  that fails (an `error` event, or Trae's stream breaking off) ends with the\n  error and `[DONE]`, with no finish.\n- **Tools:**\n  - Trae's chat has no turn for a tool call or its result, so the tools are\n    named twice:\n    - natively in `tools`, with `parameters` as a JSON string;\n    - in a system prompt that asks for each call as a\n      `<tool_call>{\"name\", \"arguments\"}</tool_call>` block.\n  - GLM also writes its own template, `<tool_call>name<arg_key>k</arg_key>\n    <arg_value>v</arg_value></tool_call>` (a string kept as written, other\n    types read as JSON), and sometimes a whole call into a native call's\n    name; both are read as the call. A name that holds the wrapper with\n    GLM's tags where its service stopped mid-call — `{\"name\":\"bash\",\n    \"arguments\":{\"command</arg_key><arg_value>ls</arg_value>` — is read too:\n    the tags are the service's own handoff, so what stands between them is\n    the model's text (a quote left unescaped read as the quote it is, a\n    comma inside a value kept, a field's closing tag ending the value before\n    it), and the fields the native call did carry are kept beside the ones\n    the name's own text fills in. A name whose tool the request doesn't\n    have, or one no field can be read from, goes on as written, as any other\n    unknown tool does.\n  - A block is read as models get it wrong too: every quote escaped\n    (`{\\\"name\\\":…}`), quotes or backslashes in a string left unescaped, an\n    opener with the name as an attribute (`<tool_call name=\"bash\">` with\n    `<parameter name=\"k\">v</parameter>`), or JSON that is whole when the\n    stream ends without `</tool_call>`. A block that still can't be read,\n    or is cut short, is never sent on as the answer: the reply ends with an\n    error (a 502 without a stream), so the gateway can try again\n    (plugins#38). A `<tool_call>` in backticks or a code fence is text.\n  - Calls from either source become OpenAI `tool_calls`. A name matching a\n    requested tool but for case or punctuation (`Read`) goes on as the\n    request's (`read`); any other goes on as written, so the agent can say\n    the tool doesn't exist.\n  - Earlier calls and their results go back in as text.\n  - Images aren't sent.\n\nThe model list is the account's own, from\n`/api/ide/v1/batch_get_detail_param`, every function's list in one ask, as\nTRAE SOLO CN asks it (`/api/ide/v1/get_detail_param`, one function at a\ntime, when the batch gives none). The lists are put together: SOLO and the\nTRAE agent list models `chat_v3` doesn't (deepseek-v4.1-flash is the TRAE\nagent's, `solo_agent`). Left out are the IDE's helpers (`usage` other than\n`chat_completion`: summary, fast_apply…), configs switched off and the\ncustom-model slots. Context is the list's `context_window_tokens.dev`,\noutput the `__dev` model's `max_tokens`. A model with a `__max` model and\na bigger `context_window_tokens.max` is listed again as its Max,\n`<id>-max` (\"… (Max)\"), with that window and the `__max` model's\n`max_tokens`; the two can come from different functions' lists (chat_v3\ncan name the `__max` model, a SOLO list the windows). It asks the\n`__max` model through the function that names it, with `max_tokens` set\nand `user_message_context.model_info.prompt_max_tokens` the window less\nit, as Max mode does. The lists needn't agree on a model's *name*: chat_v3\ncalls deepseek-v4.1-flash \"DeepSeek-V4-Flash 正式版\", as it once called\nDeepSeek-V4-Flash-Official, where the SOLO lists call it\n\"DeepSeek-V4.1-Flash\" (yetone/magpie#681). Trae's usage page books a\nrequest under the name of the list it was served through, so the plugin\ntakes the name most of a model's lists give — the one Trae's own client is\nserved under — and asks that model, and its Max, through a list carrying\nit. Trae renamed its official entries on 2026-10-09, leaving the name its\nlists mostly agree on the only thing that tells a misnamed entry apart.\n\nReasoning: the models reason, but Trae's request takes no effort or\nthinking level, so the plugin lists no variants and a level an agent\npicks does nothing. Every model it lists says so in its `capabilities`\n(`reasoning: true`, with `toolcall`, `temperature`, `attachment`, the\ninput and output modalities and an empty `variants`), the fallback\nlist's own capabilities kept where it has an entry: magpie reads\n`capabilities.reasoning` alone for a model a plugin lists, and a model\nwithout it is shown as one that doesn't reason (0.2.4).\n\nWhen no\nlist can be read, the plugin uses the realm's own fallback list. Trae CN's\n`chat_v3` is known to serve GLM-5.2, GLM-5, Kimi K2.6, Qwen 3.7 Plus,\nDeepSeek V4 Pro and DeepSeek V4 Flash; Trae Global's serves GPT-5.4,\nGemini 3 Flash, Kimi K2.5, MiniMax M2 and DeepSeek V3.2. The live list\nreplaces either.\n\n## Renewal\n\nTrae CN (since 0.2.3) renews the JWT as its clients do, bound to the\naccount's device:\n\n- **Where:** `POST api.trae.cn/trae/api/v3/oauth/ExchangeToken`, with the\n  refresh token, the device (`DeviceInfo`: its id, machine id and public\n  key) and a `DeviceProof`.\n- **The device key:** an ECDSA P-256 key pair made for each account at\n  sign-in (or at the first renewal of one signed in before 0.2.3), kept\n  with the sign-in.\n- **The proof:** the key's ECDSA-SHA256 signature (base64) of\n  `POST\\n/trae/api/v3/oauth/ExchangeToken\\n{ClientID}\\n{RefreshToken}\\n{Timestamp}\\n{Nonce}`.\n- **As whom:** TRAE SOLO CN (`en1oxy7wnw8j9n`, `SOLO_PC`) first, then\n  Trae CN's IDE (`ono9krqynydwx5`, `IDE_PC`).\n- **The refresh token:** kept; this renewal doesn't spend it.\n\nA token the sign-in page gives is renewed this way at once. When Trae\nturns the device-bound renewal away, the plugin renews as before 0.2.3.\n\nTrae Global, and Trae CN as a fallback, renew at the realm's auth host's\n`/cloudide/api/v3/trae/oauth/ExchangeToken` (`api.trae.cn`,\n`growsg-normal.trae.ai`). There Trae issues a new refresh token each time\nand spends the old one, so only one renewal runs at a time.\n\nmagpie renews the JWT ten minutes before it ends (`refreshLead`) through\n`auth.refresh`. Each request also checks it, two minutes before the end, for\nOpenCode.\n\nThe account is marked for a new sign-in in these cases:\n\n- the refresh token is turned away;\n- a request is answered 401, or with a code that means the sign-in lapsed:\n  1001 for both realms, and 20101 for Trae Global.\n\nTrae signs other clients out of an account when its token is renewed. The\nIDE may therefore ask you to sign in again after magpie renews.\n\n## Errors\n\n| Trae's answer | What the agent gets |\n| --- | --- |\n| 401 / code 1001 (both), 20101 (Global) | 401, and the account is marked for a new sign-in |\n| code 4008 / 1005 (quota, plan; both), 4011 (Global) | 429 |\n| Anything else | Trae's message and code, as a 502 or Trae's own status |\n\n## Usage\n\nmagpie's usage card shows the account's plan and allowance, from whichever\npage the realm bills on:\n\n**Trae CN** — the credits page:\n\n- **Source:** `api.trae.cn/trae/api/v2/pay/ide_user_ent_usage`.\n- **What it adds up:** each entitlement pack's `credits_limit` (-1 means\n  unlimited) and what the pack has used.\n- **What it shows:** one Credits window: the credits used of the packs'\n  total, with the share, which magpie shows as used or left like\n  WorkBuddy's.\n\n**Trae Global** — the dollar billing's entitlements:\n\n- **Source:** `POST api-sg-central.trae.ai/trae/api/v1/pay/user_current_entitlement_list`\n  (a US account asks `api-us-east.trae.ai`).\n- **What it adds up:** the pack's allowance in dollars\n  (`basic_usage_limit` plus `bonus_usage_limit`) and what was used of each\n  (`basic_usage_amount`, `bonus_usage_amount`).\n- **What it shows:** one Dollar Usage window, the dollars used of the\n  allowance, resetting when the pack ends.\n\nA 200 carrying an error code is shown as Trae's own message rather than as\nan empty answer.\n\n## Daily check-in\n\nTrae CN gives credits for a daily check-in (每日签到); Trae Global has no\nsuch page, so this is CN only. magpie can press it\nonce a day for each account (Settings, or the switch on the usage card).\nIt asks Trae CN's own pages through\nthis plugin's fetch, which sends them as the account, as Trae CN's IDE\n(3.3.104) sends them: its Cloud-IDE-JWT (renewed first when near its\nend), its device (`x-device-id`, `x-device-brand`, `x-device-type`,\n`x-os-version`, `x-app-version`) and a client's User-Agent (TRAE SOLO\nCN's Electron shell). Since 0.2.1: Bun's own User-Agent and the chat's\nheaders got 9074 「当前参与用户太多，请稍后再试」 every time\n(yetone/magpie#808). Since 0.2.3 the JWT is also bound to the device (see\nRenewal): a JWT renewed at `/cloudide/…` carries no device, and the claim\nanswered it 9074 even with the client's headers.\n\n- **Status:** `POST api.trae.cn/trae/api/v2/ug/checkin_credits/status`,\n  body `{\"req_source\":1}` (magpie's `{}` is sent as that): `enable`,\n  `checked_in`, `credits`.\n- **Claim:** `POST api.trae.cn/trae/api/v2/ug/checkin_credits/claim`,\n  the same, only while it is on and today's isn't in.\n- **What comes back:** Trae's answer as it is. A 401 or code 1001 marks\n  the account for a new sign-in. Code 9095 means this device has checked\n  in today; nothing sends another device id to get round it, nor to get\n  round a 9074.\n\nOnly `api.trae.cn`'s `/trae/api/` pages are sent this way; any other URL\nthat isn't a chat request is still refused (400). Needs 0.1.4 or later.\n"
+    },
+    "@magpie-community/opencode-workbuddy-auth": {
+      "versions": {
+        "0.1.22": {
+          "file": "tgz/magpie-community-opencode-workbuddy-auth-0.1.22.tgz",
+          "integrity": "sha512-pi151yik1OB6JuFMn4xrynunZxg5bnb7PtA8Iap2SHBkhviifB5WTrlWDPaNPc/mu5mP7UAG9lFoA+LwyuqGsw==",
+          "time": "2026-10-14T20:43:47.141Z",
+          "manifest": {
+            "name": "@magpie-community/opencode-workbuddy-auth",
+            "version": "0.1.22",
+            "description": "OpenCode provider plugins for WorkBuddy's plans: WorkBuddy (CodeBuddy, copilot.tencent.com) and WorkBuddy AI (www.workbuddy.ai)",
+            "type": "module",
+            "main": "./index.mjs",
+            "exports": "./index.mjs",
+            "files": [
+              "index.mjs",
+              "README.md"
+            ],
+            "keywords": [
+              "opencode",
+              "opencode-plugin",
+              "workbuddy",
+              "codebuddy"
+            ],
+            "license": "MIT",
+            "repository": {
+              "type": "git",
+              "url": "git+https://github.com/magpie-community/plugins.git",
+              "directory": "packages/workbuddy"
+            }
+          }
+        }
+      },
+      "latest": "0.1.22",
+      "readme": "# @magpie-community/opencode-workbuddy-auth\n\nSigns in to the plans of WorkBuddy, Tencent's desktop agent from CodeBuddy.\nIt has one provider for each of WorkBuddy's two builds:\n\n| Provider id | Build | API |\n|---|---|---|\n| `workbuddy` | WorkBuddy, the China build (CodeBuddy plan) | `https://copilot.tencent.com/v2` |\n| `workbuddy-ai` | WorkBuddy AI, the international build | `https://www.workbuddy.ai/v2` |\n\nThe package exports `WorkBuddyAuthPlugin` (`workbuddy`) and\n`WorkBuddyAIAuthPlugin` (`workbuddy-ai`).\n\n## Signing in\n\n- **Account (browser).** Opens Tencent's sign-in page for the build, the\n  one WorkBuddy's desktop app opens. The plugin then asks WorkBuddy for the\n  token every second until you're signed in, for 5 minutes at most. Nothing\n  needs to be pasted.\n- **Desktop's sign-in.** Uses the account WorkBuddy desktop is signed in\n  to. Nothing is copied: the app's file is read on each request, and never\n  changed:\n  - macOS: `~/Library/Application Support/CodeBuddyExtension/Data/Public/auth/workbuddy-desktop[-ai].info`\n  - Windows: `~/AppData/Local/CodeBuddyExtension/…`\n  - Linux: `~/.local/share/CodeBuddyExtension/…`\n\n  WorkBuddy 5.6 and later keep the sign-in encrypted, which only the app\n  opens, so this way fails there and says so: use the browser sign-in.\n\nA browser sign-in is kept as an OpenCode `oauth` auth: the access and\nrefresh tokens, their expiry, the user id and the domain; desktop's as a\nmarker, `{\"type\": \"oauth\", \"source\": \"desktop\", \"accountId\", \"uid\"}`. OpenCode keeps it in\n`auth.json`; magpie keeps it in `plugin-auth.json`. The access token is\nrefreshed a minute before it ends, and the new one is saved. If the refresh\nfails, the old token is used while it lasts.\n\nIn magpie (0.1.684 or later) the plugin also gives `auth.refresh` with\n`refreshLead` of 5 minutes: magpie renews a browser sign-in (an hour's\ntoken) 5 minutes before it ends, once for the account, before its\nrequests, models and usage ask, and saves what it gives. It goes through\nthe same one-refresh-at-a-time as a request's refresh, so a refresh token\nis never spent twice. A failed renewal, a refresh token past its end\nincluded, doesn't mark the account, as the built-in never did; magpie\ntries again later, and the old token is used meanwhile.\nOpenCode doesn't call `auth.refresh`; the check before each request stays.\n\nAn enterprise (team) account is asked for as the enterprise. A browser\nsign-in keeps the enterprise id WorkBuddy names for the account (from\n`/login/account`, else its account list), and desktop's is read from the\napp's file. Every request then carries `X-Enterprise-Id` and `X-Tenant-Id`,\nas WorkBuddy's own client sends them; without them WorkBuddy answers as the\npersonal account, with the personal plan's models. A browser sign-in made\nbefore 0.1.13 has no enterprise id kept: sign in again.\n\nDesktop's sign-in is refreshed only when the app hasn't refreshed it\nitself, and the new token is kept in memory, never written back, as magpie's\nbuilt-in WorkBuddy does.\n\n## Requests\n\nChats are chat completions (`@ai-sdk/openai-compatible`) at `<API>/chat/completions`.\nThey are streamed only; WorkBuddy refuses a chat that isn't.\n\nEach chat carries WorkBuddy's headers:\n- `Authorization`, `X-User-Id`, `X-Domain`, `X-Product: SaaS`, `X-IDE-Type: WorkBuddy`;\n- `User-Agent: WorkBuddy/5.5.6`. Without it, WorkBuddy answers error 10085;\n- the client's, which WorkBuddy's usage list shows as the client that asked\n  (使用端): `X-Agent-Purpose: conversation`, `X-IDE-Name: WorkBuddy`,\n  `X-IDE-Version`, `X-Agent-Intent: craft`, `X-Requested-With`. Both builds\n  send them, as WorkBuddy's own client does; a chat without them is counted\n  under no client at all;\n- the conversation's ids: `X-Conversation-ID`, `X-Conversation-Request-ID`,\n  `X-Conversation-Message-ID`, `X-Request-ID`. WorkBuddy's backend counts a\n  user send as one request by `X-Conversation-Request-ID`, so every step of\n  one send — a tool result sent back, a retry, another account answering —\n  carries the same one, and the user's next message carries another. The\n  conversation's is the session magpie (or OpenCode) names the request by,\n  else the chat's first user message; nothing is made up when neither names\n  one, a made-up conversation of the request's own being what splits one\n  conversation into many in the usage detail;\n- WorkBuddy AI also takes `X-Agent-Type: main`.\n\nA chat that doesn't open with a system message is given WorkBuddy's\ndefault one, as the app does.\n\nThe loader also translates OpenAI-compatible request spellings WorkBuddy\ndoesn't take: `max_completion_tokens` becomes `max_tokens`, `developer`\nmessages become `system`, and an object `tool_choice` becomes WorkBuddy's\nstring form.\n\nA chat's tools are given shapes WorkBuddy's models take. Without them\nWorkBuddy AI answers 400 \"Invalid request parameters\" (11133), DeepSeek's\nmodels to each shape below and Kimi's, GPT's, Gemini's and GLM's to some:\n- a tool's parameters with no `type`, empty, or a union (`anyOf`, `oneOf`,\n  `allOf`) at the root are an object, the union's fields merged;\n- a `pattern`'s `\\0` is `\\u0000`, which matches the same;\n- a tuple's `items` (a list) is one schema any of them fits;\n- an `enum` with no `type` takes its values' type (or that and `\"null\"`),\n  and an `enum` of several types is an `anyOf` of one typed `enum` for\n  each, at any depth; an empty `enum` is left out (Kimi and DeepSeek, an\n  MCP server's tools, #122);\n- `true` and `false` where a schema goes are `{}` and `{\"not\": {}}`\n  (`additionalProperties` is left); a `required` that isn't a list, and a\n  `type` JSON Schema doesn't name, are left out, and `\"String\"` is\n  `\"string\"`;\n- a tool's name with a character other than letters, digits, `_` and `-`\n  (`.`, `:`, `/`, a space, CJK) is sent with `_` there, and the model's\n  calls come back under the tool's own name.\n\nWorkBuddy AI's `gemini-3.8-flash` answers 400 \"the conversation must end\nwith a user message\" (11153) to a chat whose tool results are followed by\nthe user's message, as magpie sends Claude Code's reminders, words typed\nmid-task and a tool's images. Such a chat goes again with an empty\nassistant message between the results and the user's message, which it\nserves; a model that refused it once gets it that way from then on, until\nthe plugin restarts. A chat ending with the assistant's message (a prefill)\nis refused as before.\n\n## Models\n\nWhen you are signed in, the models are the ones WorkBuddy's product config\ngives its CLI agent (`GET /v3/config`), with their context, image input and\nreasoning levels. Until then, or if WorkBuddy doesn't answer, the list below\nis used.\n\n`workbuddy`:\n- Auto\n- Hy4 preview, Hy3, Hy3-X\n- Deepseek-V4.1-Flash, Deepseek-V4-Pro\n- GLM-5.3, GLM-5.3-Flash, GLM-5.2, GLM-5.1, GLM-5v-Turbo\n- MiniMax-M3\n- Kimi-K3, Kimi-K2.7-Code, Kimi-K2.6\n\n`workbuddy-ai`:\n- Default, Fast, Balanced, Primary, Deep\n- GPT-5.5, GPT-5.4, GPT-5.3-Codex\n- Gemini-3.1-Pro, Gemini-3.5-Flash\n- GLM-5.3, GLM-5.2\n- Hy3\n- Kimi-K3, Kimi-K2.6\n- MiniMax-M3\n\nA model's reasoning levels are its variants (`reasoningEffort`).\n\nA model's price is its `credits` (\"x0.29\") and the config's\n`modelPromotions`. A discount for whole days (Step-5-Preview's 独家限免) is\nthe price now, with the price before it (`rateWas`). A price that holds only\nsome hours of the day (Hy4 preview, free 23:00–8:00) is given as its full\nprice, never as free: magpie keeps the list until it asks again, so a list\nasked for at night would say \"free\" all day (#121).\n\n## Credits in magpie\n\nmagpie's usage card shows the account's credits from the resource summary.\nIt also says when the soonest credits left run out (`runsOutAt`, and how\nmany: `runsOut`), from the paid and free package lists WorkBuddy's own\nclient reads. The daily Free Plan slice isn't counted: it ends at the same\nmidnight on every account. magpie's smart routing spends the account whose\ncredits run out first.\n\nAn enterprise (team) account's resource summary lists no packages. Its\ncredits are read from the enterprise meter\n(`/billing/meter/get-enterprise-user-usage`), the one WorkBuddy's own usage\npage reads: the cycle's credits used of its limit, and when the cycle\nresets (magpie #1904).\n\n## Not here\n\nmagpie's built-in WorkBuddy does more than this package:\n- the daily check-in;\n- the credits meter (`/billing/meter/get-user-resource-summary`);\n- several accounts under one provider.\n\nOpenCode's plugin API has no place for these.\n"
+    },
+    "@magpie-community/opencode-zcode-auth": {
+      "versions": {
+        "0.1.18": {
+          "file": "tgz/magpie-community-opencode-zcode-auth-0.1.18.tgz",
+          "integrity": "sha512-vyGZf7iiye2Q41DmK8Pm4b4lT3xaQ3UqPw4p9+RLvZoTX/sJMh+VR7pS4qG4DHMbGwaPjcRTbSV6riMbIpXJfQ==",
+          "time": "2026-10-14T20:43:47.455Z",
+          "manifest": {
+            "name": "@magpie-community/opencode-zcode-auth",
+            "version": "0.1.18",
+            "description": "OpenCode provider plugin: signs in to Z.ai's or BigModel's (智谱) GLM Coding Plan as ZCode does, including team seats and ZCode's Start Plan",
+            "type": "module",
+            "main": "./index.mjs",
+            "exports": "./index.mjs",
+            "files": [
+              "index.mjs",
+              "prompt.mjs",
+              "README.md"
+            ],
+            "keywords": [
+              "opencode",
+              "opencode-plugin",
+              "magpie",
+              "zcode",
+              "z.ai",
+              "bigmodel",
+              "glm",
+              "coding-plan"
+            ],
+            "license": "MIT",
+            "repository": {
+              "type": "git",
+              "url": "git+https://github.com/magpie-community/plugins.git",
+              "directory": "packages/zcode"
+            }
+          }
+        }
+      },
+      "latest": "0.1.18",
+      "readme": "# @magpie-community/opencode-zcode-auth\n\nSigns in to Z.ai's GLM Coding Plan, or BigModel's (智谱). It does this the\nway [ZCode](https://zcode.z.ai) does, and serves the plan's GLM models\nover Anthropic's Messages API. Provider id: `zcode`.\n\n## Signing in\n\n- **ZCode: Z.ai GLM Coding Plan** and **ZCode: BigModel (智谱) GLM Coding Plan**\n  - zcode.z.ai opens a sign-in flow, and the browser signs in to Z.ai or to\n    BigModel. The plugin polls the flow until it is done, so there is\n    nothing to paste.\n  - With that sign-in it takes the key named `zcode-api-key` from the\n    account's default project, or makes it if it isn't there, as ZCode does.\n    Requests go to `api.z.ai/api/anthropic` or\n    `open.bigmodel.cn/api/anthropic`.\n  - If the account has no plan of its own, it looks for a seat on a team's\n    plan and uses that team project's `zcode-team-api-key`.\n  - Failing both, it uses ZCode's free **Start Plan**, served by zcode.z.ai\n    with ZCode's session token.\n  - zcode.z.ai serves the Start Plan only to requests that look like the\n    ZCode client's own, and refuses others with HTTP 405 \"request has been\n    blocked due to unusual activity\". So a Start Plan request goes as\n    ZCode's does: ZCode's headers, ZCode's system prompt ahead of the\n    agent's, the day in a `<system-reminder>` turn before the agent's\n    turns, and the sign-in's device id in `metadata.user_id`. GLM Coding\n    Plan and team requests go as the agent sent them.\n  - The Start Plan's token can't be refreshed. When it runs out, sign in\n    again.\n- **ZCode app's sign-in**\n  - Uses the account the ZCode app on this computer is signed in to. For\n    every request it reads ZCode's own credentials (`~/.zcode/v2`), so it\n    follows ZCode as it signs in again, renews its session or switches to a\n    team's plan, but only while ZCode is signed in to that same account.\n    Once ZCode signs out, or signs in to another account, the sign-in uses\n    what it saved when it was added; when that session has run out, it\n    asks to be signed in again. It never sends one account's requests with\n    another's credentials: to use both, add the app's sign-in once for each.\n- **GLM Coding Plan API key**\n  - Paste a key (`<id>.<secret>`) and say which site it is from.\n\n## Where the sign-in is kept\n\nIn OpenCode's `auth.json` (magpie: `plugin-auth.json`), under `zcode`:\n\n- **The browser sign-ins** are kept as an `oauth` entry:\n  - `access` is the key.\n  - `refresh` is JSON holding the site, the endpoint, the key, ZCode's\n    token, the team project, the plan and a device id of this plugin's own.\n- **A pasted key** is kept as an `api` entry, with the site in `metadata`.\n\nThe plugin never writes ZCode's own credential store. It reads it only for\nthe ZCode app's sign-in (`refresh` then holds `\"source\": \"zcode\"`).\n\n## How requests are routed\n\nBefore each request, the plugin checks which plan the account is on, and\nasks again every 10 minutes:\n\n- If the key's account has a GLM Coding Plan\n  (`/api/biz/subscription/list`), its requests go to that plan. A model\n  the account's gift plans also serve is listed again as\n  `<model>-Trial`; asking that entry spends the gift (see below).\n- Otherwise they go to the gift plans.\n\nEvery request carries the key as both `x-api-key` and\n`Authorization: Bearer`.\n\n**The gift's trial entries.** An account with a GLM Coding Plan can\nalso hold gift plans from ZCode activities, ones that expire on a fixed\ndate. Their allowance would lapse unused if every request went to the\ncoding plan, so the plugin reads the gift's balance (per the sign-in's\nsession, kept for 10 minutes) and lists every model a live bucket\nserves again as `<model>-Trial`, named in the catalog's spelling\n(GLM-5.3-Flash-Trial). Asking a trial entry sends the model to the\ngift, dressed as ZCode's own; asking the plain model spends the coding\nplan — the choice is the user's. A bucket is judged spent only by its\n`remaining_units` — a missing one is unknown, not spent. A trial entry\nwhose bucket is spent or blocked answers 429 without touching the\ncoding plan; when the gift answers a trial entry with a quota error\n(code 1113 \"Insufficient balance or no resource package\", code 1005\n\"exceed quota limit\", which it can answer inside an HTTP 200) that too\nbecomes a 429 and keeps the entry off for a minute. Any other gift\nanswer (its 405, its 401, its 5xx) goes on as it came: the user picked\nthe gift, so the coding plan is not spent behind their back. Every 429\ncounts as spent, Z.ai's 1302/1303 rate limits among them. A stream's\nbody is never read or buffered on the way.\n\n## The usage card\n\nAn account with both plans shows both allowances: the coding plan's\nwindows first, then the gift's buckets, each with its own name, models\nand end. The card's plan and term stay the coding plan's. A gift read\nthat fails leaves just the coding card — magpie hides a card's windows\nbehind an error, so a gift hiccup must not black out a working Coding\nPlan. A gift that goes out of date while requests use it simply stops\nshowing.\n\n**Gift plans ZCode holds but has not granted.** ZCode hands out one-off\ntrust-build / gift plans (a day's ZCode Trust Build, say) that are not\non the account until the ZCode app claims them. The plugin reads the\napp's own list of them (`GET /api/v1/zcode-plan/billing/preview`) with\nthe card and names them there — the window is named \"Gift plans to\nclaim in the ZCode app\" and the display shows \"1 · ZCode Trust Build\"\n— set aside, so the line stops nothing and routing, usage caps and the\nmenu bar pass it over. The name is a fixed sentence magpie can\ntranslate; the count and the plan's own name are the display. The plugin never claims one: the claim needs the\nAliyun captcha attestation only the app's renderer can make. A preview\nthat fails, or lists nothing, adds no line at all, and a card that is an\nerror keeps its error. Claim the plan in the ZCode app (open it once);\nthe next read shows it as an ordinary gift bucket.\n\n## Models\n\nThe models are the ones ZCode offers for the account's plan. They come\nfrom ZCode's provider config: the release zcode.z.ai names, or an\ninstalled ZCode's copy if that one is newer. The list is kept for 10\nminutes. When the config can't be read, the plugin falls back to this list:\n\n| Model | Context | Output | Efforts |\n|---|---|---|---|\n| GLM-5.3 | 1M | 128K | low, high, max |\n| GLM-5.3-Flash | 1M | 128K | low, high, max |\n| GLM-5.2 | 1M | 128K | none, high, max |\n| GLM-5-Turbo | 200K | 64K | none, high |\n\nThe Start Plan's config has all of these except GLM-5.3. An account\nwith no GLM Coding Plan also lists every model its gift plans serve under\nthe model's own name, as ZCode does (the Start Plan's GLM-5.3 bucket makes\nGLM-5.3 a model), since all of its requests go to the gift anyway.\n\nA gift plan's models appear again as `<model>-Trial` entries, so a\nrequest can spend the gift's quota on purpose. A trial entry is listed\nwhile any live bucket serves its model, spent buckets included (a spent\nentry answers 429 rather than vanishing mid-session).\n\nTwo plans can give one model (ZCode Trust Build and the Start Plan both\ngive GLM-5.3-Flash). The server picks the bucket, so the usage card\ncounts the model on its live bucket, the least used, and sets a spent\nsibling aside. A spent sibling never makes the model, or the account,\nlook used up while another bucket still has quota.\n"
+    },
+    "@magpie-community/opencode-zed-auth": {
+      "versions": {
+        "0.1.7": {
+          "file": "tgz/magpie-community-opencode-zed-auth-0.1.7.tgz",
+          "integrity": "sha512-WXZbrslJPE2B5c0DnuijP8sxaetQNyVKBpmydb6FWRVkO6wMkD683GJy4t6RadPqp6DTMZ6YI6ajUfnGdgqQ0g==",
+          "time": "2026-10-14T20:43:47.772Z",
+          "manifest": {
+            "name": "@magpie-community/opencode-zed-auth",
+            "version": "0.1.7",
+            "description": "Sign in to a Zed subscription (Zed Pro, trial, student, business) from OpenCode or magpie",
+            "type": "module",
+            "main": "./index.mjs",
+            "files": [
+              "index.mjs",
+              "README.md"
+            ],
+            "keywords": [
+              "opencode",
+              "opencode-plugin",
+              "magpie",
+              "zed"
+            ],
+            "license": "MIT",
+            "repository": {
+              "type": "git",
+              "url": "git+https://github.com/magpie-community/plugins.git",
+              "directory": "packages/zed"
+            }
+          }
+        }
+      },
+      "latest": "0.1.7",
+      "readme": "# @magpie-community/opencode-zed-auth\n\nSigns in to a **Zed** subscription (Zed Pro, its trial, a student or business\nplan) and calls the models Zed hosts: Anthropic's, OpenAI's, Google's and\nxAI's, through `cloud.zed.dev`, the way the Zed editor calls them. Provider\nid: `zed`. Ported from magpie's built-in Zed account.\n\n## Sign-in\n\n**Sign in with Zed (browser)** is Zed's own sign-in:\n\n1. The plugin makes an RSA-2048 key and listens on a port of `127.0.0.1`.\n2. The browser opens `zed.dev/native_app_signin` with that port and the\n   key's public half.\n3. Once you sign in, zed.dev sends the browser back to the port with your\n   user id and an access token encrypted to the key. The browser is then\n   sent on to zed.dev's \"signed in\" page.\n4. The plugin asks Zed who the account is (`/client/users/me`). That gives\n   the organization the models are called under: the default one, else the\n   first. It also gives the plan. An organization with Zed's hosted models\n   turned off is refused.\n\nThe sign-in is kept as an `oauth` entry: `access` is the access token and\n`refresh` is JSON holding the user id, machine id, organization and plan.\nZed has no refresh token, so the token lasts until Zed refuses it. When\nZed refuses it, you are asked to sign in again. `accountId` is the account's\nGitHub login.\n\n## Requests\n\n- **Model token:** each request uses a short-lived model token, minted from\n  the sign-in with `POST /client/llm_tokens` and kept in memory. If Zed calls\n  the token stale (a 401, `x-zed-expired-token` or `x-zed-outdated-token`),\n  it is minted again once.\n- **API per model:** each model is declared on the AI SDK package of its\n  own provider, so the request the SDK writes is already what Zed wants.\n  The plugin's `fetch` wraps it as `{provider, model, provider_request}` and\n  sends it to `POST /completions` with Zed's headers:\n\n  | Zed provider | AI SDK package | API |\n  |---|---|---|\n  | anthropic | `@ai-sdk/anthropic` | Messages |\n  | open_ai | `@ai-sdk/openai` | Responses |\n  | x_ai | `@ai-sdk/openai-compatible` | chat completions |\n  | google | `@ai-sdk/google` | generateContent |\n\n- **Request changes, as magpie makes them:**\n  - Anthropic: the request loses `stream`, since the cloud always streams.\n    Every `tool_result` gets `is_error` (Zed's cloud refuses one without it).\n  - xAI: `max_tokens` becomes `max_completion_tokens`.\n  - Gemini: the model is named in the request as `models/<id>`.\n- **Replies:**\n  - Zed's newline-delimited lines are sent back as each API's own\n    server-sent events.\n  - A caller that didn't ask for a stream gets one whole reply.\n  - A failure Zed reports mid-stream keeps its status (429, 402, 529 …).\n    So does a reply without Zed's `stream_ended`, which comes back as an\n    error rather than a shorter answer, except one case. A streamed xAI\n    (chat) reply that has already said something, and has no tool call\n    half written, ends cut short instead, with a note saying so, a `stop`\n    and `[DONE]` (#91). magpie's gateway can go on with an Anthropic or\n    Responses reply cut short, but not with a chat one.\n  - A 402 means the plan doesn't include Zed's hosted models, or its\n    allowance is used up.\n\n## Models\n\n- **After sign-in:** the account's own list comes from Zed's `GET /models`,\n  read when you sign in and every 10 minutes after. Disabled models are\n  left out. Each model's effort levels become its variants.\n- **Before sign-in:** the config hook declares one model of each family\n  (Claude Sonnet 5, Opus 5.5, Haiku 4.5, GPT-5.5, Gemini 3.5 Flash,\n  Grok 4.7), which the account's list replaces.\n\n## Not included\n\n- magpie's plan display: plan name, billing period, overdue invoices. Zed\n  doesn't report how much of the allowance is spent.\n- Several Zed accounts at once. OpenCode keeps one sign-in per provider.\n- magpie's web-search stand-in.\n"
+    },
+    "@magpie-community/opencode-zen-free-auth": {
+      "versions": {
+        "0.1.7": {
+          "file": "tgz/magpie-community-opencode-zen-free-auth-0.1.7.tgz",
+          "integrity": "sha512-LvQLgFZllSUwTlgYDRP079X4g9JqmWyRAA12TZq+bjCO+3WdzNA1wUIcA7kXdyM/M7n/jO4zCWTgGfa3XZlzaw==",
+          "time": "2026-10-14T20:43:48.103Z",
+          "manifest": {
+            "name": "@magpie-community/opencode-zen-free-auth",
+            "version": "0.1.7",
+            "description": "OpenCode Zen free models through the public credential, with native streaming protocols",
+            "type": "module",
+            "main": "./index.mjs",
+            "files": [
+              "index.mjs",
+              "provider.mjs",
+              "models.mjs",
+              "stream.mjs",
+              "tool-response.mjs",
+              "README.md",
+              "LICENSE"
+            ],
+            "keywords": [
+              "opencode",
+              "opencode-plugin",
+              "zen",
+              "free",
+              "magpie"
+            ],
+            "license": "MIT",
+            "repository": {
+              "type": "git",
+              "url": "https://github.com/magpie-community/plugins",
+              "directory": "packages/zen-free"
+            },
+            "scripts": {
+              "test": "bun test"
+            },
+            "magpie": {
+              "icon": "https://opencode.ai/favicon-v3.ico",
+              "maxConcurrency": 2
+            }
+          }
+        }
+      },
+      "latest": "0.1.7",
+      "readme": "# OpenCode Zen Free\n\nOpenCode Zen's free models in magpie and OpenCode. Provider id:\n`opencode-zen-free`.\n\nSince 2026-10-13 Zen's free tier answers 403 FreeTierError (\"can only be\nused from within OpenCode\") to a request that isn't OpenCode's. From\n0.1.6 the plugin sends a free-model request with exactly the headers\nOpenCode 1.19.0 sends to Zen, and a session id of OpenCode's own form.\nOlder versions (0.1.1 on npm before it) get the 403: update the plugin.\n\n## Install\n\n```sh\nmagpie plugin add @magpie-community/opencode-zen-free-auth\nmagpie plugin login opencode-zen-free\n```\n\n## Sign in\n\nEnter `public` in the key field. No personal API key is needed.\nThe credential is kept in OpenCode's `auth.json` or magpie's\n`plugin-auth.json`.\n\n## Models\n\nThe plugin discovers Zen's current free models, including their context\nwindows and reasoning levels. Use `opencode-zen-free/<model>`, for example\n`opencode-zen-free/big-pickle`.\n\nRetired models and SystemOne models are excluded. The list is asked\nagain each time the host lists models (magpie does this on start and every\nhour): a model Zen no longer gives free leaves it, and a new free one joins\nit. When Zen's list can't be read, the last list is kept. A request for a\nmodel that isn't free now gets a 404 naming the free ones; one made free\nsince the last list is served after the list is asked again (at most once a\nminute). Availability and rate limits are set by Zen; the plugin has no\nremaining-quota data.\n\n## Requests\n\nRequests go to `https://opencode.ai/inference/v1` using each model's native\nChat Completions, Responses or Anthropic Messages API. Streaming and\nordinary JSON replies are supported.\n\nThe agent's tools are preserved. Zen's models often call OpenCode's own\ntool names; such a call is given the agent's tool whose name differs only\nin case (`bash` to `Bash`), or else only in case and `_`/`-` (`todowrite`\nto `todo_write`, `webfetch` to `web_fetch`), when exactly one does. A\ncall with no such tool (or with no name) is left out of the reply, and\nthe reply's text says which name was left out; a turn whose every call\nwas left out ends as an ordinary answer. Tools run in the agent.\n\nZen's free tier only answers a request that carries tools, so a request\nis sent with the five core OpenCode tools the agent doesn't declare\nitself (`bash`, `edit`, `glob`, `grep`, `read`), described as not\navailable. A call of one of them the agent doesn't have is left out like\nany other.\n\nNow and then Zen closes a streamed Chat Completions reply before its\n`[DONE]`. When the reply has said something and no tool call of it is\nunfinished, it ends there as an ordinary answer, and its text says it was\ncut short; asking again goes on. A reply cut short with a tool call\nunfinished, with nothing said, or collapsed for a client that doesn't\nstream fails with an error naming the reply's id and how much of it came.\nAn Anthropic Messages or Responses reply cut short fails too: magpie\ntells it from a whole one and, where the model can, goes on with it.\n"
+    }
+  }
+}
