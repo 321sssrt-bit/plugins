@@ -230,6 +230,47 @@
       "latest": "0.1.0",
       "readme": "# @magpie-community/middleware-param-override\n\nNew API's **参数覆盖** (a channel's `param_override`) as [magpie](https://usemagpie.ai) gateway middleware. It sets, deletes, moves and rewrites any field of the requests agents send through magpie, whichever provider serves them. The options are New API's JSON as it is, so you can paste a `param_override` from New API unchanged.\n\nInstall it from magpie's **Plugins › Discover**, or with `magpie plugin add @magpie-community/middleware-param-override`. Then set its options under **Plugins › Installed › Options**, or with `magpie plugin options param-override '<json>'`.\n\n## Options\n\nThere are two forms, as in New API:\n\n```json\n{ \"temperature\": 0.2, \"max_tokens\": 8000 }\n```\n\nEach key is set on the body as it is.\n\n```json\n{ \"operations\": [\n  { \"path\": \"max_tokens\", \"mode\": \"set\", \"value\": 32000,\n    \"conditions\": [{ \"path\": \"max_tokens\", \"mode\": \"gt\", \"value\": 32000 }] },\n  { \"path\": \"temperature\", \"mode\": \"delete\",\n    \"conditions\": [{ \"path\": \"model\", \"mode\": \"contains\", \"value\": \"reasoner\" }] },\n  { \"mode\": \"return_error\", \"value\": { \"message\": \"opus is not allowed here\", \"status_code\": 403 },\n    \"conditions\": [{ \"path\": \"model\", \"mode\": \"contains\", \"value\": \"opus\" }] }\n] }\n```\n\nThe operations run in order. Keys set beside `operations` are applied first.\n\n| Field | |\n| --- | --- |\n| `path` | A gjson path: `a.b.0`. `messages.-1` counts from the end, `tools.*.name` matches every item, and `\\.` is a dot inside a key. |\n| `mode` | `set` (`keep_origin`: only when missing), `delete`, `move` / `copy` (`from`, `to`), `prepend` / `append` (arrays joined, strings joined, objects merged; `keep_origin` keeps keys already there), `trim_prefix`, `trim_suffix`, `ensure_prefix`, `ensure_suffix`, `trim_space`, `to_lower`, `to_upper`, `replace` / `regex_replace` (`from`, `to`; Go's `${1}` works), `return_error`, `prune_objects` |\n| `value` | What to set, join or trim. For `return_error`, a message or `{message, status_code}`; the agent gets the error in its own API's shape. For `prune_objects`, a `type` or `{type, where, conditions, logic, recursive}`. |\n| `conditions` | `[{path, mode, value, invert, pass_missing_key}]`, where `mode` is `full`, `prefix`, `suffix`, `contains`, `gt`, `gte`, `lt` or `lte`. A path is looked up in the body first, then in the request: `model`, `request_path`, `protocol` (`anthropic`, `chat`, `responses`, `gemini`), `agent`, `stream`. |\n| `logic` | `OR` (New API's default) or `AND`. |\n\nSome of New API's modes have nothing to act on here and are left out: the header modes (`set_header`, `pass_headers`…), `sync_fields`, and conditions on retries, users and groups. The middleware sees only the body.\n\nUnlike New API, an operation that can't apply is skipped (a `move` from a missing path, `trim_prefix` on a number) and the request goes on. If the middleware itself fails, magpie sends the request as it came.\n\n## Recipes\n\n- Cap `max_tokens` for a provider with a lower limit: the first example above.\n- Drop a parameter a provider refuses: `{\"path\": \"tools.*.input_examples\", \"mode\": \"delete\"}`.\n- Strip a vendor prefix from model names: `{\"path\": \"model\", \"mode\": \"trim_prefix\", \"value\": \"openai/\"}`.\n- Keep an agent off a model: `return_error` with a `model` condition.\n- Remove old thinking blocks: `{\"path\": \"messages\", \"mode\": \"prune_objects\", \"value\": \"thinking\"}`.\n\n中文：New API 的「参数覆盖」，作为 magpie 网关中间件。配置是 New API 的同一份 JSON，可以原样粘贴过来。\n"
     },
+    "@magpie-community/middleware-reserve": {
+      "versions": {
+        "0.1.0": {
+          "file": "tgz/magpie-community-middleware-reserve-0.1.0.tgz",
+          "integrity": "sha512-rFtHdBSdRFYnZQCLAHRq6NZYAfl0VhXSSvTAdNU/3qK6zzyzwpt1qpwlIKbYQNvV2ZjcOwoN8Fhh60/BWUjx3A==",
+          "time": "2026-10-15T18:59:06.609Z",
+          "manifest": {
+            "name": "@magpie-community/middleware-reserve",
+            "version": "0.1.0",
+            "description": "Routings for magpie's gateway that keep something in reserve: fill accounts in order up to a ceiling, or spend subscriptions before pay-per-token keys",
+            "type": "module",
+            "files": [
+              "reserve.gateway.js",
+              "README.md"
+            ],
+            "keywords": [
+              "magpie",
+              "magpie-middleware",
+              "magpie-routing",
+              "routing",
+              "load-balancing",
+              "llm-gateway"
+            ],
+            "license": "MIT",
+            "repository": {
+              "type": "git",
+              "url": "git+https://github.com/magpie-community/plugins.git",
+              "directory": "packages/reserve"
+            },
+            "magpie": {
+              "gateway": "./reserve.gateway.js",
+              "options": {
+                "ceiling": 80
+              }
+            }
+          }
+        }
+      },
+      "latest": "0.1.0",
+      "readme": "# @magpie-community/middleware-reserve\n\nTwo routings for [magpie](https://usemagpie.ai) that keep something in reserve. Pick one for a provider's accounts or keys, or for a routing group's members, and magpie's gateway tries them in the order it gives.\n\nInstall it from magpie's **Plugins › Discover**, or with `magpie plugin add @magpie-community/middleware-reserve`. While it is on, every routing picker offers `reserve/ceiling` and `reserve/accounts-first`. From the command line, a group takes one with:\n\n```sh\nmagpie group set <id> routing=reserve/ceiling\n```\n\n## Routings\n\n**`reserve/ceiling`** fills the accounts in the order listed, but keeps the last share of each one's allowance.\n\n- The first account takes requests until it has used `ceiling` percent of its allowance, then the next one takes over.\n- Once every account is past the ceiling, the least used goes first.\n- A seat whose allowance isn't known (an API key, or an account not read yet) counts as below the ceiling.\n- A seat resting after a failure goes last.\n\nUse it to keep, say, a fifth of your main account's week for when you're at its own app, while the gateway uses the rest.\n\n**`reserve/accounts-first`** puts subscriptions before API keys, so what you have paid for already goes first. A key that bills by the token is used only when no account can take the request.\n\n- Accounts go least used first.\n- Keys go by their weight, highest first, then by what they were sent lately.\n- Seats resting after a failure go last.\n\n## Options\n\n```json\n{ \"ceiling\": 80 }\n```\n\n`ceiling` is the percent of an account's allowance past which `reserve/ceiling` moves on, from 1 to 100. It is 80 when none is set. Set it under **Plugins › Installed › Options**, or with `magpie plugin options reserve '{\"ceiling\": 70}'`.\n\n## Test\n\n`strategies.json` holds the cases: seats in, the order wanted out. `reserve.test.mjs` runs them with `checkStrategies()` from `scripts/middleware.mjs`, and checks that each answer is a permutation of the seats.\n\n```sh\nbun test packages/reserve\n```\n\n中文：两种为账号留余量的路由。`reserve/ceiling` 按列出的顺序使用账号，每个账号用到额度的 `ceiling`%（默认 80）就换下一个，全部超过后用得最少的优先；`reserve/accounts-first` 订阅账号优先于按量计费的 API key，key 按权重排序。休息中的总是排最后。\n"
+    },
     "@magpie-community/middleware-system-prompt": {
       "versions": {
         "0.1.0": {
@@ -1403,6 +1444,92 @@
       },
       "latest": "0.1.9",
       "readme": "# OpenCode Zen Free\n\nOpenCode Zen's free models in magpie and OpenCode. Provider id:\n`opencode-zen-free`.\n\nSince 2026-10-13 Zen's free tier answers 403 FreeTierError (\"can only be\nused from within OpenCode\") to a request that isn't OpenCode's. From\n0.1.6 the plugin sends a free-model request with exactly the headers\nOpenCode 1.19.0 sends to Zen, and a session id of OpenCode's own form.\nOlder versions (0.1.1 on npm before it) get the 403: update the plugin.\n\n## Install\n\n```sh\nmagpie plugin add @magpie-community/opencode-zen-free-auth\nmagpie plugin login opencode-zen-free\n```\n\n## Sign in\n\nEnter `public` in the key field. No personal API key is needed.\nThe credential is kept in OpenCode's `auth.json` or magpie's\n`plugin-auth.json`.\n\n## Models\n\nThe plugin discovers Zen's current free models, including their context\nwindows and reasoning levels. Use `opencode-zen-free/<model>`, for example\n`opencode-zen-free/big-pickle`.\n\nRetired models and SystemOne models are excluded. The list is asked\nagain each time the host lists models (magpie does this on start and every\nhour): a model Zen no longer gives free leaves it, and a new free one joins\nit. A model Zen lists as `-free` that OpenCode's catalog and docs don't\ndescribe yet (or can't be read) is offered too, on Chat Completions, as\nOpenCode asks a model with no package of its own. When Zen's list can't be\nread, the last list is kept. A request for a\nmodel that isn't free now gets a 404 naming the free ones; one made free\nsince the last list is served after the list is asked again (at most once a\nminute). Availability and rate limits are set by Zen; the plugin has no\nremaining-quota data.\n\n## Requests\n\nRequests go to `https://opencode.ai/inference/v1` using each model's native\nChat Completions, Responses or Anthropic Messages API. Streaming and\nordinary JSON replies are supported.\n\nThe agent's tools are preserved. Zen's models often call OpenCode's own\ntool names; such a call is given the agent's tool whose name differs only\nin case (`bash` to `Bash`), or else only in case and `_`/`-` (`todowrite`\nto `todo_write`, `webfetch` to `web_fetch`), when exactly one does. A\ncall with no such tool (or with no name) is left out of the reply, and\nthe reply's text says which name was left out; a turn whose every call\nwas left out ends as an ordinary answer. Tools run in the agent.\n\nZen's free tier only answers a request that carries tools, so a request\nis sent with the five core OpenCode tools the agent doesn't declare\nitself (`bash`, `edit`, `glob`, `grep`, `read`), described as not\navailable. A call of one of them the agent doesn't have is left out like\nany other.\n\nNow and then Zen closes a streamed Chat Completions reply before its\n`[DONE]`. When the reply has said something and no tool call of it is\nunfinished, it ends there as an ordinary answer, and its text says it was\ncut short; asking again goes on. A reply cut short with a tool call\nunfinished, with nothing said, or collapsed for a client that doesn't\nstream fails with an error naming the reply's id and how much of it came.\nAn Anthropic Messages or Responses reply cut short fails too: magpie\ntells it from a whole one and, where the model can, goes on with it.\n"
+    },
+    "@magpie-community/page-usage": {
+      "versions": {
+        "0.1.0": {
+          "file": "tgz/magpie-community-page-usage-0.1.0.tgz",
+          "integrity": "sha512-XUF03lkCuKAqvf0X8e4BY9K6RwaGod4F6Dd2MyIh9eD/X3Fzwda2Xi9itZF3nQu8Gak3teFaQ5aSZDb78mMgUg==",
+          "time": "2026-10-15T18:59:06.859Z",
+          "manifest": {
+            "name": "@magpie-community/page-usage",
+            "version": "0.1.0",
+            "description": "A page in magpie's window with your usage at a glance: calls, errors, tokens and cost for today, 7 or 30 days, and the models that took them",
+            "files": [
+              "page",
+              "README.md"
+            ],
+            "keywords": [
+              "magpie",
+              "magpie-page",
+              "usage",
+              "tokens",
+              "cost"
+            ],
+            "license": "MIT",
+            "repository": {
+              "type": "git",
+              "url": "git+https://github.com/magpie-community/plugins.git",
+              "directory": "packages/usage"
+            },
+            "magpie": {
+              "page": {
+                "title": "Usage glance",
+                "file": "page/index.html",
+                "icon": "page/icon.svg"
+              },
+              "permissions": [
+                "usage:summary"
+              ],
+              "options": {
+                "period": "today",
+                "sort": "tokens"
+              }
+            }
+          }
+        }
+      },
+      "latest": "0.1.0",
+      "readme": "# @magpie-community/page-usage\n\nA page in [magpie](https://usemagpie.ai)'s window with your usage at a glance. It shows calls, errors, tokens and cost for today, 7 days or 30 days, and the models that took them.\n\nInstall it from magpie's **Plugins › Discover**, or with `magpie plugin add @magpie-community/page-usage`. It then has a tab, **Usage glance**, under Plugins in the sidebar, in the app and in `magpie web`.\n\n## What it reads\n\nOnly `usage:summary`, the one permission its `package.json` declares (`magpie.permissions`). That is magpie's totals for a period, and the top models in it. magpie refuses any other read the page asks for.\n\nLike every plugin page, it runs in a sandboxed frame. It has no network (`connect-src 'none'`), no inline scripts, and no access to magpie's API except through `_magpie/bridge.js`.\n\n## Options\n\n```json\n{ \"period\": \"today\", \"sort\": \"tokens\" }\n```\n\nThe page saves the period (`today`, `7d`, `30d`) and the model sort (`tokens`, `calls`, `cost`) you last picked, so it opens the same next time.\n\n## Files\n\n- `page/index.html`, `page/style.css`: the page. It takes magpie's theme from the `--magpie-*` variables, light or dark.\n- `page/view.js`: what the numbers and rows say, in English and Chinese, with no DOM. The test loads it.\n- `page/app.js`: reads through the bridge, draws, and refreshes every minute.\n\n## Test\n\n```sh\nbun test packages/usage\n```\n\n中文：在 magpie 窗口里加一个「Usage glance」页面，一眼看到今天、7 天或 30 天的调用、错误、token 和费用，以及用到的模型。它只读取声明过的 `usage:summary`，运行在无网络的沙盒 frame 里。\n"
+    },
+    "@magpie-community/tools-calc": {
+      "versions": {
+        "0.1.0": {
+          "file": "tgz/magpie-community-tools-calc-0.1.0.tgz",
+          "integrity": "sha512-aVbFoBmNyJYWBuabxKH4WXBEsFU5zZSslkDKl8ugyFbo/omoHXyoqlpV0JrzSPplk1IIN1J9pTuVKzIbWkfeIQ==",
+          "time": "2026-10-15T18:59:06.357Z",
+          "manifest": {
+            "name": "@magpie-community/tools-calc",
+            "version": "0.1.0",
+            "description": "Exact arithmetic, unit conversion and calendar date math as tools for every coding agent, through magpie's MCP server",
+            "type": "module",
+            "main": "./index.mjs",
+            "files": [
+              "index.mjs",
+              "calc.mjs",
+              "README.md"
+            ],
+            "keywords": [
+              "magpie",
+              "magpie-tools",
+              "mcp",
+              "opencode",
+              "opencode-plugin",
+              "calculator",
+              "units",
+              "dates"
+            ],
+            "license": "MIT",
+            "repository": {
+              "type": "git",
+              "url": "git+https://github.com/magpie-community/plugins.git",
+              "directory": "packages/calc"
+            }
+          }
+        }
+      },
+      "latest": "0.1.0",
+      "readme": "# @magpie-community/tools-calc\n\nExact arithmetic, unit conversion and date math, as tools [magpie](https://usemagpie.ai) offers every agent it connects. Models get arithmetic wrong (`0.1 + 0.2`, big powers, days between two dates across a DST change), so this gives them a calculator. It needs no network, no key and no dependency.\n\nInstall it from magpie's **Plugins › Discover**, or with:\n\n```sh\nmagpie plugin add @magpie-community/tools-calc\nmagpie plugin            # lists its tools\n```\n\nmagpie serves the tools on its MCP server, `/mcp/magpie/tools`, to every agent it has connected. Each tool's name starts with the plugin's: `tools-calc_eval` when installed from npm, `calc_eval` from a folder (`magpie plugin add ./packages/calc`).\n\n## Tools\n\n**`eval`** `{expression, places?}` evaluates an expression exactly, in fractions, with no floating point.\n\n- Operators: `+ - * / % ^` (or `**`), parentheses, and unary minus.\n- Numbers: decimals, `1e9`, `0x`/`0b`/`0o` literals, and `1_000`.\n- Functions: `abs floor ceil round trunc min max gcd lcm fact`.\n- It answers `{exact, decimal}`, plus `rounded: true` when the decimal was cut at `places` (20 by default).\n\n```\n0.1+0.2          → {\"exact\":\"3/10\",\"decimal\":\"0.3\"}\n2^128/3          → every digit, exact\n1/0              → an error: division by zero\n```\n\n**`convert`** `{value, from, to, places?}` converts a quantity exactly. `value` can be an expression, such as `3*1024`.\n\n| Kind | Units |\n|---|---|\n| Data | `bit B kB MB GB TB` (1000s), `KiB MiB GiB TiB` (1024s), `kb Mb Gb` |\n| Time | `ns us ms s min h d wk` |\n| Length | `nm um mm cm m km in ft yd mi nmi` |\n| CSS | `px pt pc` |\n| Mass | `mg g kg t oz lb` |\n| Angle | `deg turn grad` |\n| Temperature | `C F K` |\n\n```\n1 GiB → MB       → {\"exact\":\"16777216/15625\",\"decimal\":\"1073.741824\",\"unit\":\"MB\"}\n```\n\n**`date`** `{date?, add?, to?, timeZone?}` does date math on the real calendar.\n\n- `date` is ISO 8601, unix seconds or milliseconds, or `now` (the default). It answers the ISO time, weekday, ISO week, day of year and unix time.\n- `add` is a duration, such as `3d 4h`, `-90m`, `1y2mo` or ISO `P1DT2H`. Years, months and days count on the calendar, so Jan 31 + 1mo is the last day of February, and a day across a DST change is still a day.\n- `to` is a second date. The answer then also has `between`, the time from `date` (after `add`) to `to`, in days, hours, minutes, seconds and calendar years, months and days.\n- `timeZone` is an IANA zone, such as `Asia/Shanghai`. Dates with no offset are read as that zone's wall time, and the answer shows the local time. Without it, they are UTC.\n\n## Test\n\n```sh\nbun test packages/calc\n```\n\n中文：给 magpie 连接的每个 agent 提供精确计算工具：`eval` 用分数精确计算表达式，`convert` 换算数据、时间、长度、质量、角度和温度单位，`date` 按真实日历做日期加减和间隔（支持时区与夏令时）。不联网，不需要 key。\n"
     }
   }
 }
