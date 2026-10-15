@@ -38,6 +38,45 @@
       "latest": "0.1.1",
       "readme": "# @magpie-community/agent-aider\n\n[Aider](https://aider.chat) as a magpie agent. magpie has no setup of its own\nfor Aider; with this plugin it is on magpie's Agents page like the agents\nmagpie ships with.\n\n```sh\nmagpie plugin add @magpie-community/agent-aider\n```\n\nThen pick one of magpie's models in Aider's row. magpie writes into\n`~/.aider.conf.yml`:\n\n```yaml\nmodel: openai/deepseek/deepseek-flash   # magpie's model, through litellm's openai/ prefix\nopenai-api-base: http://127.0.0.1:3425/v1\nopenai-api-key: magpie-aider            # Aider's own key, so Usage names it\nshow-model-warnings: false\n```\n\nYour comments and other settings stay. Picking Aider's own model again, or\nswitching it off, puts every key back as it was. Restart Aider after a change:\nit reads its settings when it starts.\n\nHow agent plugins work: [usemagpie.ai/docs/plugins#agents](https://usemagpie.ai/docs/plugins#agents).\n"
     },
+    "@magpie-community/agent-type4me": {
+      "versions": {
+        "0.1.0": {
+          "file": "tgz/magpie-community-agent-type4me-0.1.0.tgz",
+          "integrity": "sha512-hlMFSSoVx2fw0ORjsk0rJPd2IUOHsz4+A0oJLMSAqsqhnpqfqY2aIwD0Lb7vWuaK1tEcZxgbuYG3dNjXTbNQ0g==",
+          "time": "2026-10-15T05:15:48.455Z",
+          "manifest": {
+            "name": "@magpie-community/agent-type4me",
+            "version": "0.1.0",
+            "description": "Type4Me (macOS voice input) as a magpie agent: pick one of magpie's models for its LLM post-processing on the Agents page",
+            "type": "module",
+            "files": [
+              "type4me.agent.js",
+              "README.md"
+            ],
+            "keywords": [
+              "magpie",
+              "magpie-agent",
+              "type4me",
+              "voice-input",
+              "llm-gateway"
+            ],
+            "license": "MIT",
+            "repository": {
+              "type": "git",
+              "url": "git+https://github.com/magpie-community/plugins.git",
+              "directory": "packages/type4me"
+            },
+            "homepage": "https://github.com/kchen0x/magpie-agent-type4me",
+            "magpie": {
+              "agent": "./type4me.agent.js",
+              "icon": "https://raw.githubusercontent.com/kchen0x/magpie-agent-type4me/main/assets/icon.png"
+            }
+          }
+        }
+      },
+      "latest": "0.1.0",
+      "readme": "# @magpie-community/agent-type4me\n\n[Type4Me](https://github.com/joewongjc/type4me), a macOS voice input app, as a\nmagpie agent. With this plugin Type4Me is on magpie's Agents page like the\nagents magpie ships with: pick one of magpie's models for its LLM\npost-processing in Type4Me's row.\n\n```sh\nmagpie plugin add @magpie-community/agent-type4me\n```\n\nUntil it is on npm, install it from GitHub:\n\n```sh\nmagpie plugin add github:kchen0x/magpie-agent-type4me\n```\n\nThen pick one of magpie's models in Type4Me's row, or\n`magpie type4me magpie/deepseek/deepseek-flash`. magpie writes into\n`~/Library/Application Support/Type4Me/magpie-agent.json`:\n\n```json\n{\n  \"model\": \"deepseek/deepseek-flash\",\n  \"baseURL\": \"http://127.0.0.1:3425/v1\",\n  \"apiKey\": \"magpie-…\"\n}\n```\n\nIn Type4Me, choose **Magpie (Local Gateway)** under Settings › Models and set\nit as the default. Type4Me reads the file before each dictation, so a new model\ntakes effect on the next one, with no restart.\n\n- Type4Me and Type4Me Dev share that folder: one plugin covers both.\n- Picking a model in Type4Me's own settings changes it in magpie too (Type4Me\n  runs `magpie type4me magpie/<model>`). Type4Me never changes `baseURL` or\n  `apiKey`.\n- Switching Type4Me off in magpie removes the three keys; Type4Me then talks to\n  magpie directly, with the model picked in Type4Me.\n\nType4Me works with magpie without this plugin too, listing magpie's models\nitself. The plugin adds Type4Me to magpie's Agents page, menu bar and profiles.\n\nHow agent plugins work: [usemagpie.ai/docs/plugins#agents](https://usemagpie.ai/docs/plugins#agents).\n\n## Develop\n\nThe source lives at [kchen0x/magpie-agent-type4me](https://github.com/kchen0x/magpie-agent-type4me)\nand is copied to `packages/type4me` in\n[magpie-community/plugins](https://github.com/magpie-community/plugins).\n\n```sh\nbun test                                # what connect returns\nmagpie plugin add ./type4me.agent.js    # try it on your own magpie\n```\n\n`agent.config` must match `MagpieAgentFile.defaultURL` in Type4Me.\n"
+    },
     "@magpie-community/middleware-block-patterns": {
       "versions": {
         "0.1.1": {
