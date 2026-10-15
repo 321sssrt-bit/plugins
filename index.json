@@ -1260,10 +1260,51 @@
               "maxConcurrency": 2
             }
           }
+        },
+        "0.1.9": {
+          "file": "tgz/magpie-community-opencode-zen-free-auth-0.1.9.tgz",
+          "integrity": "sha512-SaWx6QtMMcmI+vWApWtUox6nvFhrTtof+RC0g+TN72Yt23LODFRZfbgEnj88yDlHs+Xh2r+TYCK9PiEmKQJaBg==",
+          "time": "2026-10-15T11:57:56.736Z",
+          "manifest": {
+            "name": "@magpie-community/opencode-zen-free-auth",
+            "version": "0.1.9",
+            "description": "OpenCode Zen free models through the public credential, with native streaming protocols",
+            "type": "module",
+            "main": "./index.mjs",
+            "files": [
+              "index.mjs",
+              "provider.mjs",
+              "models.mjs",
+              "stream.mjs",
+              "tool-response.mjs",
+              "README.md",
+              "LICENSE"
+            ],
+            "keywords": [
+              "opencode",
+              "opencode-plugin",
+              "zen",
+              "free",
+              "magpie"
+            ],
+            "license": "MIT",
+            "repository": {
+              "type": "git",
+              "url": "https://github.com/magpie-community/plugins",
+              "directory": "packages/zen-free"
+            },
+            "scripts": {
+              "test": "bun test"
+            },
+            "magpie": {
+              "icon": "https://opencode.ai/favicon-v3.ico",
+              "maxConcurrency": 2
+            }
+          }
         }
       },
-      "latest": "0.1.8",
-      "readme": "# OpenCode Zen Free\n\nOpenCode Zen's free models in magpie and OpenCode. Provider id:\n`opencode-zen-free`.\n\nSince 2026-10-13 Zen's free tier answers 403 FreeTierError (\"can only be\nused from within OpenCode\") to a request that isn't OpenCode's. From\n0.1.6 the plugin sends a free-model request with exactly the headers\nOpenCode 1.19.0 sends to Zen, and a session id of OpenCode's own form.\nOlder versions (0.1.1 on npm before it) get the 403: update the plugin.\n\n## Install\n\n```sh\nmagpie plugin add @magpie-community/opencode-zen-free-auth\nmagpie plugin login opencode-zen-free\n```\n\n## Sign in\n\nEnter `public` in the key field. No personal API key is needed.\nThe credential is kept in OpenCode's `auth.json` or magpie's\n`plugin-auth.json`.\n\n## Models\n\nThe plugin discovers Zen's current free models, including their context\nwindows and reasoning levels. Use `opencode-zen-free/<model>`, for example\n`opencode-zen-free/big-pickle`.\n\nRetired models and SystemOne models are excluded. The list is asked\nagain each time the host lists models (magpie does this on start and every\nhour): a model Zen no longer gives free leaves it, and a new free one joins\nit. When Zen's list can't be read, the last list is kept. A request for a\nmodel that isn't free now gets a 404 naming the free ones; one made free\nsince the last list is served after the list is asked again (at most once a\nminute). Availability and rate limits are set by Zen; the plugin has no\nremaining-quota data.\n\n## Requests\n\nRequests go to `https://opencode.ai/inference/v1` using each model's native\nChat Completions, Responses or Anthropic Messages API. Streaming and\nordinary JSON replies are supported.\n\nThe agent's tools are preserved. Zen's models often call OpenCode's own\ntool names; such a call is given the agent's tool whose name differs only\nin case (`bash` to `Bash`), or else only in case and `_`/`-` (`todowrite`\nto `todo_write`, `webfetch` to `web_fetch`), when exactly one does. A\ncall with no such tool (or with no name) is left out of the reply, and\nthe reply's text says which name was left out; a turn whose every call\nwas left out ends as an ordinary answer. Tools run in the agent.\n\nZen's free tier only answers a request that carries tools, so a request\nis sent with the five core OpenCode tools the agent doesn't declare\nitself (`bash`, `edit`, `glob`, `grep`, `read`), described as not\navailable. A call of one of them the agent doesn't have is left out like\nany other.\n\nNow and then Zen closes a streamed Chat Completions reply before its\n`[DONE]`. When the reply has said something and no tool call of it is\nunfinished, it ends there as an ordinary answer, and its text says it was\ncut short; asking again goes on. A reply cut short with a tool call\nunfinished, with nothing said, or collapsed for a client that doesn't\nstream fails with an error naming the reply's id and how much of it came.\nAn Anthropic Messages or Responses reply cut short fails too: magpie\ntells it from a whole one and, where the model can, goes on with it.\n"
+      "latest": "0.1.9",
+      "readme": "# OpenCode Zen Free\n\nOpenCode Zen's free models in magpie and OpenCode. Provider id:\n`opencode-zen-free`.\n\nSince 2026-10-13 Zen's free tier answers 403 FreeTierError (\"can only be\nused from within OpenCode\") to a request that isn't OpenCode's. From\n0.1.6 the plugin sends a free-model request with exactly the headers\nOpenCode 1.19.0 sends to Zen, and a session id of OpenCode's own form.\nOlder versions (0.1.1 on npm before it) get the 403: update the plugin.\n\n## Install\n\n```sh\nmagpie plugin add @magpie-community/opencode-zen-free-auth\nmagpie plugin login opencode-zen-free\n```\n\n## Sign in\n\nEnter `public` in the key field. No personal API key is needed.\nThe credential is kept in OpenCode's `auth.json` or magpie's\n`plugin-auth.json`.\n\n## Models\n\nThe plugin discovers Zen's current free models, including their context\nwindows and reasoning levels. Use `opencode-zen-free/<model>`, for example\n`opencode-zen-free/big-pickle`.\n\nRetired models and SystemOne models are excluded. The list is asked\nagain each time the host lists models (magpie does this on start and every\nhour): a model Zen no longer gives free leaves it, and a new free one joins\nit. A model Zen lists as `-free` that OpenCode's catalog and docs don't\ndescribe yet (or can't be read) is offered too, on Chat Completions, as\nOpenCode asks a model with no package of its own. When Zen's list can't be\nread, the last list is kept. A request for a\nmodel that isn't free now gets a 404 naming the free ones; one made free\nsince the last list is served after the list is asked again (at most once a\nminute). Availability and rate limits are set by Zen; the plugin has no\nremaining-quota data.\n\n## Requests\n\nRequests go to `https://opencode.ai/inference/v1` using each model's native\nChat Completions, Responses or Anthropic Messages API. Streaming and\nordinary JSON replies are supported.\n\nThe agent's tools are preserved. Zen's models often call OpenCode's own\ntool names; such a call is given the agent's tool whose name differs only\nin case (`bash` to `Bash`), or else only in case and `_`/`-` (`todowrite`\nto `todo_write`, `webfetch` to `web_fetch`), when exactly one does. A\ncall with no such tool (or with no name) is left out of the reply, and\nthe reply's text says which name was left out; a turn whose every call\nwas left out ends as an ordinary answer. Tools run in the agent.\n\nZen's free tier only answers a request that carries tools, so a request\nis sent with the five core OpenCode tools the agent doesn't declare\nitself (`bash`, `edit`, `glob`, `grep`, `read`), described as not\navailable. A call of one of them the agent doesn't have is left out like\nany other.\n\nNow and then Zen closes a streamed Chat Completions reply before its\n`[DONE]`. When the reply has said something and no tool call of it is\nunfinished, it ends there as an ordinary answer, and its text says it was\ncut short; asking again goes on. A reply cut short with a tool call\nunfinished, with nothing said, or collapsed for a client that doesn't\nstream fails with an error naming the reply's id and how much of it came.\nAn Anthropic Messages or Responses reply cut short fails too: magpie\ntells it from a whole one and, where the model can, goes on with it.\n"
     }
   }
 }
