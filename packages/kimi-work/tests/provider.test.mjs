@@ -43,7 +43,7 @@ test('inference always uses the Work gateway and live Work credential, preservin
   expect(calls[0].url).toBe(I.BASE+'/chat/completions');
   expect(calls[0].init.headers.get('authorization')).toBe('Bearer '+session.workToken);
   expect(calls[0].init.headers.get('x-api-key')).toBeNull();expect(calls[0].init.headers.get('cookie')).toBeNull();
-  expect(calls[0].init.headers.get('user-agent')).toBe(I.UA);
+  expect(calls[0].init.headers.get('user-agent')).toBe('kimi-code-cli/0.36.0');
   expect(calls[0].init.body).toBe(body);expect(calls[0].init.signal).toBe(signal);expect(calls[0].init.redirect).toBe('error');
   live={...live,workToken:'synthetic-rotated-work-token'};await loader.fetch(I.BASE+'/chat/completions',init);
   expect(calls[1].init.headers.get('authorization')).toBe('Bearer synthetic-rotated-work-token');

@@ -11,8 +11,25 @@ const MEMBER = 'https://www.kimi.com/apiv2/kimi.gateway.membership.v2.Membership
 // gateway takes (requestParams.modelId). An account's tier models, K3.1 Pro
 // on the 99 plan among them, are listed here and not in /models.
 const CONFIG = 'https://www.kimi.com/apiv2/kimi.gateway.config.v1.ConfigService/DescribeKimiWorkConfig';
-const {version} = JSON.parse(fs.readFileSync(new URL('./package.json', import.meta.url), 'utf8'));
-const UA = 'Magpie Kimi Work provider/' + version;
+// What Kimi's own Work client sends agent-gw (Kimi 3.2.20's daimon 0.6.10,
+// createDaimonKimiCodeRequestHeaders): the vendored Kimi Code's version as
+// "kimi-code-cli/<version>" (no daimon caller passes a suffix), and the
+// X-Msh device headers beside it (magpie-community/plugins#353).
+const KIMI_CODE_VERSION = '0.36.0';
+const DAIMON_VERSION = '0.6.10';
+const UA = 'kimi-code-cli/' + KIMI_CODE_VERSION;
+const ascii = (v, fallback = 'unknown') => String(v ?? '').replace(/[^\x20-\x7e]/g, '').trim() || fallback;
+function deviceModel() {
+  const t = os.type(), r = os.release(), a = os.arch();
+  if (t === 'Darwin') return 'macOS ' + r + ' ' + a;
+  if (t === 'Windows_NT') return 'Windows ' + r + ' ' + a;
+  return (t + ' ' + r + ' ' + a).trim();
+}
+function workHeaders(deviceId) {
+  return {'User-Agent':UA,...(deviceId?{'X-Msh-Device-Id':deviceId}:{}),
+    'X-Msh-Device-Model':ascii(deviceModel()),'X-Msh-Device-Name':ascii(os.hostname()),'X-Msh-Os-Version':ascii(os.release()),
+    'X-Msh-Platform':'kimi-code-cli','X-Msh-Version':KIMI_CODE_VERSION,'X-Msh-Daimon-Version':DAIMON_VERSION};
+}
 const expired = () => Object.assign(Error('请先在本机 Kimi 桌面版登录 Work，再重新连接 Kimi Work 供应商。'), {signIn:'expired',code:'kimi_work_login_expired'});
 const unavailable = error => Object.assign(Error('Kimi Work 连接失败：' + (error?.cause?.code || error?.message || '未知网络错误'), {cause:error}), {code:'kimi_work_connection_failed'});
 const percent = x => typeof x === 'number' && Number.isFinite(x) ? Math.max(0,Math.min(100,x*100)) : undefined;
@@ -185,6 +202,17 @@ function desktopFile({home=os.homedir(), platform=process.platform, appdata=proc
   return path.join(parent,'kimi-desktop','daimon-share','daimon','config.json');
 }
 
+// The install id Kimi's daimon made for its Kimi Code home
+// (<daimon>/runtime/kimi-code/home/device_id, a randomUUID it writes once)
+// and sends as X-Msh-Device-Id. It is read, never made or written here: the
+// desktop app owns it, and without it the header is left out.
+function readDeviceId(file) {
+  try {
+    const id=fs.readFileSync(path.join(path.dirname(file),'runtime','kimi-code','home','device_id'),'utf8').trim();
+    return /^[\x21-\x7e]{1,128}$/.test(id)?id:undefined;
+  } catch {return undefined;}
+}
+
 // Read the live Work sign-in, including after rotation. Never consume its
 // refresh token or write the desktop app's configuration. The internal field
 // is called kimiCode, but this credential is issued for agent-gw (Work).
@@ -196,7 +224,7 @@ function readDesktop(file=desktopFile()) {
     const work=doc.credentials?.kimiCode, web=doc.credentials?.kimiWeb;
     if(typeof work?.apiKey!=='string'||!work.apiKey || typeof web?.accessToken!=='string'||!web.accessToken
       || typeof web.userId!=='string'||!web.userId || work.baseUrl?.replace(/\/$/,'')!==BASE) throw expired();
-    return {workToken:work.apiKey,webToken:web.accessToken,
+    return {workToken:work.apiKey,webToken:web.accessToken,deviceId:readDeviceId(file),
       uid:createHash('sha256').update('kimi-work-account\0'+web.userId).digest('hex')};
   } catch {throw expired();}
 }
@@ -277,9 +305,9 @@ function createPlugin({readSession=readDesktop,fetchImpl=globalThis.fetch}={}) {
     if(auth?.source!=='kimi-work-desktop'||auth.uid!==session.uid)throw expired();
     return session;
   };
-  async function jsonRequest(url,token,body,signal) {
+  async function jsonRequest(url,token,body,signal,deviceId) {
     const response=await fetchImpl(url,{method:body===undefined?'GET':'POST',
-      headers:{Authorization:'Bearer '+token,'User-Agent':UA,'Accept':'application/json',
+      headers:{Authorization:'Bearer '+token,...(url.startsWith(BASE)?workHeaders(deviceId):{'User-Agent':UA}),'Accept':'application/json',
         ...(body===undefined?{}:{'Content-Type':'application/json','Connect-Protocol-Version':'1'})},
       ...(body===undefined?{}:{body:JSON.stringify(body)}),signal:signal||AbortSignal.timeout(15000),redirect:'error'});
     if(response.status===401)throw expired();
@@ -305,7 +333,7 @@ function createPlugin({readSession=readDesktop,fetchImpl=globalThis.fetch}={}) {
         url:'',method:'auto',instructions:'读取本机 Kimi 桌面版的 Work 登录；不会使用 Kimi Code API Key。',
         callback:async()=>{
           try{
-            const s=readSession();await jsonRequest(BASE+'/models',s.workToken);
+            const s=readSession();await jsonRequest(BASE+'/models',s.workToken,undefined,undefined,s.deviceId);
             // Only an account reference is saved in Magpie. Actual credentials
             // stay in Kimi's own file and are reread for every operation.
             return {type:'success',access:'',refresh:'',expires:0,source:'kimi-work-desktop',
@@ -325,8 +353,10 @@ function createPlugin({readSession=readDesktop,fetchImpl=globalThis.fetch}={}) {
           const s=current(await getAuth());
           const headers=new Headers(request?request.headers:init.headers);
           for(const key of ['authorization','x-api-key','cookie','host','content-length','origin'])headers.delete(key);
+          // magpie's own x-magpie-* hints are for the plugin, not for Kimi.
+          for(const key of [...headers.keys()])if(key.startsWith('x-magpie-'))headers.delete(key);
           headers.set('Authorization','Bearer '+s.workToken);
-          headers.set('User-Agent',UA);
+          for(const [k,v] of Object.entries(workHeaders(s.deviceId)))headers.set(k,v);
           headers.set('Content-Type','application/json');
           // Preserve messages, stream and abort signal, and tools but for
           // the schema shapes Kimi refuses (moonshotTools). There is no
@@ -362,7 +392,7 @@ function createPlugin({readSession=readDesktop,fetchImpl=globalThis.fetch}={}) {
       // other; both failing throws, so the last good list is kept.
       const [cfgList,gw]=await Promise.allSettled([
         s.webToken?jsonRequest(CONFIG,s.webToken,{}).then(workConfigRows):Promise.reject(Error('no web token')),
-        jsonRequest(BASE+'/models',s.workToken).then(modelRows)]);
+        jsonRequest(BASE+'/models',s.workToken,undefined,undefined,s.deviceId).then(modelRows)]);
       const a=cfgList.status==='fulfilled'?cfgList.value:{},b=gw.status==='fulfilled'?gw.value:{};
       if(gw.status==='rejected'&&!Object.keys(a).length)throw gw.reason;
       const out={...a};
@@ -375,4 +405,4 @@ function createPlugin({readSession=readDesktop,fetchImpl=globalThis.fetch}={}) {
 }
 
 export default async function KimiWorkProvider(){return createPlugin();}
-export const _internal={createPlugin,moonshotTools,moonshotSchema,readDesktop,desktopFile,modelRows,workConfigRows,BASE,MEMBER,CONFIG,UA};
+export const _internal={createPlugin,moonshotTools,moonshotSchema,readDesktop,desktopFile,modelRows,workConfigRows,BASE,MEMBER,CONFIG,UA,workHeaders,readDeviceId};
