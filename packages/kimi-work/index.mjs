@@ -6,6 +6,11 @@ import {createHash} from 'node:crypto';
 const ID = 'kimi-work';
 const BASE = 'https://agent-gw.kimi.com/coding/v1';
 const MEMBER = 'https://www.kimi.com/apiv2/kimi.gateway.membership.v2.MembershipService/';
+// Kimi's desktop builds its Work model menu from this call, not from
+// agent-gw's /models: models plus moreModels, each with the id Work's
+// gateway takes (requestParams.modelId). An account's tier models, K3.1 Pro
+// on the 99 plan among them, are listed here and not in /models.
+const CONFIG = 'https://www.kimi.com/apiv2/kimi.gateway.config.v1.ConfigService/DescribeKimiWorkConfig';
 const {version} = JSON.parse(fs.readFileSync(new URL('./package.json', import.meta.url), 'utf8'));
 const UA = 'Magpie Kimi Work provider/' + version;
 const expired = () => Object.assign(Error('请先在本机 Kimi 桌面版登录 Work，再重新连接 Kimi Work 供应商。'), {signIn:'expired',code:'kimi_work_login_expired'});
@@ -223,6 +228,49 @@ function modelRows(payload) {
   return out;
 }
 
+// DescribeKimiWorkConfig's reply, Connect JSON (camelCase, or the proto's
+// own snake_case names, which the desktop asks for).
+const pick=(o,a,b)=>isObj(o)?(o[a]??o[b]):undefined;
+const EFFORTS=new Set(['off','low','medium','high','xhigh','max']);
+function workConfigRows(payload) {
+  const list=[...(Array.isArray(pick(payload,'models','models'))?pick(payload,'models','models'):[]),
+    ...(Array.isArray(pick(payload,'moreModels','more_models'))?pick(payload,'moreModels','more_models'):[])];
+  if(list.length>100)throw Error('Kimi Work 模型目录暂不可用。');
+  const out={};
+  for(const m of list) {
+    const rp=pick(m,'requestParams','request_params'),display=pick(m,'display','display');
+    const dc=pick(m,'daimonModelConfig','daimon_model_config');
+    const id=String(pick(rp,'modelId','model_id')??'').trim();
+    if(!id||id.length>256||/[\x00-\x20/]/.test(id)||out[id])continue;
+    const variants=Object.create(null);
+    // The levels requestParams lists, else the daimon's supportEfforts, as
+    // the desktop does; "off" is REASONING_EFFORT_NONE there.
+    const opts=pick(rp,'reasoningEffortOptions','reasoning_effort_options');
+    for(const x of Array.isArray(opts)?opts:[]) {
+      const effort=String(pick(x,'reasoningEffort','reasoning_effort')||pick(x,'effort','effort')||'').trim().replace(/^REASONING_EFFORT_/,'').toLowerCase();
+      if(/^[a-z][a-z0-9_-]{0,63}$/.test(effort)&&effort!=='unspecified')variants[effort]={reasoningEffort:effort};
+    }
+    const support=pick(dc,'supportEfforts','support_efforts');
+    if(!Object.keys(variants).length)for(const x of Array.isArray(support)?support:[]) {
+      const effort=String(x).trim().toLowerCase();
+      if(EFFORTS.has(effort))variants[effort==='off'?'none':effort]={reasoningEffort:effort==='off'?'none':effort};
+    }
+    const caps=pick(dc,'capabilities','capabilities');
+    const has=c=>Array.isArray(caps)&&caps.includes(c);
+    const image=has('image_in'),thinking=has('thinking')||Object.keys(variants).length>0;
+    const max=Number(pick(dc,'maxContextSize','max_context_size'))||262144;
+    out[id]={id,name:String(pick(display,'displayName','display_name')||'').trim()||id,
+      api:{id,url:BASE,npm:'@ai-sdk/openai-compatible'},
+      // Standard context, as /models' rows: XL is a header the desktop
+      // sends only when the user picks it.
+      limit:{context:Math.min(max,262144),output:32768},
+      capabilities:{reasoning:thinking,toolcall:true,attachment:image,
+        input:{text:true,image,video:false,audio:false,pdf:false},output:{text:true}},
+      variants};
+  }
+  return out;
+}
+
 function createPlugin({readSession=readDesktop,fetchImpl=globalThis.fetch}={}) {
   const current=auth=>{
     const session=readSession();
@@ -309,10 +357,22 @@ function createPlugin({readSession=readDesktop,fetchImpl=globalThis.fetch}={}) {
     },
     provider:{id:ID,models:async(provider,{auth}={})=>{
       if(auth?.source!=='kimi-work-desktop')return provider.models;
-      const s=current(auth);return modelRows(await jsonRequest(BASE+'/models',s.workToken));
+      const s=current(auth);
+      // Both lists, the desktop's menu first. Either one failing leaves the
+      // other; both failing throws, so the last good list is kept.
+      const [cfgList,gw]=await Promise.allSettled([
+        s.webToken?jsonRequest(CONFIG,s.webToken,{}).then(workConfigRows):Promise.reject(Error('no web token')),
+        jsonRequest(BASE+'/models',s.workToken).then(modelRows)]);
+      const a=cfgList.status==='fulfilled'?cfgList.value:{},b=gw.status==='fulfilled'?gw.value:{};
+      if(gw.status==='rejected'&&!Object.keys(a).length)throw gw.reason;
+      const out={...a};
+      // An id both list keeps /models' row (the gateway's own context and
+      // image flags) under the desktop's name for it.
+      for(const [id,row] of Object.entries(b))out[id]=out[id]?{...row,name:out[id].name}:row;
+      return out;
     }},
   };
 }
 
 export default async function KimiWorkProvider(){return createPlugin();}
-export const _internal={createPlugin,moonshotTools,moonshotSchema,readDesktop,desktopFile,modelRows,BASE,MEMBER,UA};
+export const _internal={createPlugin,moonshotTools,moonshotSchema,readDesktop,desktopFile,modelRows,workConfigRows,BASE,MEMBER,CONFIG,UA};

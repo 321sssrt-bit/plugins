@@ -68,7 +68,7 @@ test('models come from Work; usage reports only the shared membership allowance'
   const usage=await p.auth.usage(async()=>account);expect(usage.windows).toHaveLength(1);expect(usage.windows[0].used).toBe(42);
   expect(usage.windows[0]).not.toHaveProperty('resetsAt');
   expect(usage.windows[0].name).toBe('会员共享额度');
-  expect(calls[1].init.headers.Authorization).toBe('Bearer '+session.webToken);
+  expect(calls.find(x=>x.url.endsWith('GetSubscriptionStats')).init.headers.Authorization).toBe('Bearer '+session.webToken);
   expect(calls.every(x=>!x.url.includes('api.kimi.com'))).toBe(true);
 });
 
@@ -133,4 +133,38 @@ test('before the account list is read, both models Work has listed are offered',
   expect(Object.keys(cfg.provider['kimi-work'].models)).toEqual(['k3-agent','k2d8-preview']);
   const payload=JSON.parse(fs.readFileSync(new URL('./fixtures/work-models.redacted.json',import.meta.url),'utf8'));
   expect(Object.keys(cfg.provider['kimi-work'].models)).toEqual(payload.data.map(m=>m.id));
+});
+
+const workConfig=JSON.parse(fs.readFileSync(new URL('./fixtures/work-config.shape.json',import.meta.url),'utf8'));
+const snake=x=>Array.isArray(x)?x.map(snake):x&&typeof x==='object'?Object.fromEntries(Object.entries(x).map(([k,v])=>[k.replace(/[A-Z]/g,c=>'_'+c.toLowerCase()),snake(v)])):x;
+
+test('the desktop menu\'s models are listed: a tier model /models leaves out shows under its own id',async()=>{
+  const calls=[];const p=I.createPlugin({readSession:()=>session,fetchImpl:async(url,init)=>{
+    calls.push({url,init});return url===I.CONFIG?json(workConfig):json(modelPayload);}});
+  const models=await p.provider.models({models:{}},{auth:account});
+  expect(Object.keys(models)).toEqual(['k3-agent','k3d1-pro','k2d8-preview']);
+  expect(models['k3d1-pro']).toMatchObject({id:'k3d1-pro',name:'Kimi K3.1 Pro',api:{id:'k3d1-pro',url:I.BASE},limit:{context:262144}});
+  expect(models['k3d1-pro'].capabilities).toMatchObject({reasoning:true,attachment:true});
+  // supportEfforts' "off" is the desktop's REASONING_EFFORT_NONE.
+  expect(Object.keys(models['k3d1-pro'].variants)).toEqual(['none','high','max']);
+  expect(models['k2d8-preview'].name).toBe('K2.8 Preview');
+  // An id both list keeps /models' row under the menu's name.
+  expect(models['k3-agent']).toMatchObject({name:'K3',variants:{high:{reasoningEffort:'high'}}});
+  const c=calls.find(x=>x.url===I.CONFIG);
+  expect(c.init).toMatchObject({method:'POST',body:'{}'});
+  expect(c.init.headers).toMatchObject({Authorization:'Bearer '+session.webToken,'Connect-Protocol-Version':'1','Content-Type':'application/json'});
+  expect(calls.find(x=>x.url===I.BASE+'/models').init.headers.Authorization).toBe('Bearer '+session.workToken);
+});
+
+test('the menu is read in the proto\'s own field names too',()=>{
+  expect(Object.keys(I.workConfigRows(snake(workConfig)))).toEqual(['k3-agent','k3d1-pro','k2d8-preview']);
+  expect(I.workConfigRows(snake(workConfig))['k3d1-pro'].name).toBe('Kimi K3.1 Pro');
+});
+
+test('either list failing leaves the other; both failing throws so the last good list stays',async()=>{
+  const run=f=>I.createPlugin({readSession:()=>session,fetchImpl:f}).provider.models({models:{}},{auth:account});
+  expect(Object.keys(await run(async url=>url===I.CONFIG?new Response('{}',{status:500}):json(modelPayload)))).toEqual(['k3-agent']);
+  expect(Object.keys(await run(async url=>url===I.CONFIG?json(workConfig):new Response('{}',{status:502})))).toEqual(['k3-agent','k3d1-pro','k2d8-preview']);
+  await expect(run(async()=>new Response('{}',{status:502}))).rejects.toThrow();
+  await expect(run(async url=>url===I.CONFIG?json({models:[]}):new Response('{}',{status:502}))).rejects.toThrow();
 });
