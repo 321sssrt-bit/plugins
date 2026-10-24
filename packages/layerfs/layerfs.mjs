@@ -166,12 +166,12 @@ export function checkSourceDir(sourceDir, { configDir, storeRoot } = {}) {
   const src = canonicalForCompare(given) // real path, case-folded: the guard's currency
   const overlaps = (a, b) => a === b || a.startsWith(b + sep) || b.startsWith(a + sep)
   const refuses = [
-    [join(homedir(), ".config", "magpie"), "magpie's config directory, which holds plugin credentials (plugin-auth.json)"],
+    [join(homedir(), ".config", "magpie"), "the app's config directory, which holds plugin credentials (plugin-auth.json)"],
     [join(homedir(), ".ssh"), "the SSH directory"],
     [join(homedir(), ".aws"), "the AWS directory"],
     [join(homedir(), ".gnupg"), "the GnuPG directory"],
   ]
-  if (configDir) refuses.unshift([configDir, "magpie's config directory, which holds plugin credentials (plugin-auth.json)"])
+  if (configDir) refuses.unshift([configDir, "the app's config directory, which holds plugin credentials (plugin-auth.json)"])
   for (const [dir, what] of refuses)
     if (overlaps(src, canonicalForCompare(dir)))
       throw new Error(`refusing to import ${given}: it is, contains, or sits inside ${what}`)
@@ -738,15 +738,15 @@ export class SimBackend {
 // MAGPIE_LAYERFS_NATIVE=1, or by the old "native" plugin option — is
 // an explicit, loud error, never a silent fall back to sim.
 const SIM_ONLY_NATIVE_ERROR =
-  "this package is sim-only: the native LayerFS backend is not part of the magpie-community package " +
+  "this package is sim-only: the native LayerFS backend is not part of it " +
   "(it returns in a follow-up PR once @layerfs/sdk is published to npm with a version to pin; " +
-  "it is developed in the standalone repo, Mola-maker/magpie-layerfs). " +
-  "Unset MAGPIE_LAYERFS_BACKEND / MAGPIE_LAYERFS_NATIVE and the \"native\" option to use the sim backend."
+  "it is developed in its standalone repo). " +
+  "Unset the native backend's environment switches and the \"native\" option to use the sim backend."
 
 export async function createBackend(env = process.env, options = {}) {
   const want = (env.MAGPIE_LAYERFS_BACKEND || "auto").toLowerCase()
   if (want === "native" || env.MAGPIE_LAYERFS_NATIVE === "1" || options?.native === true)
     throw new Error(SIM_ONLY_NATIVE_ERROR)
   if (want === "sim" || want === "auto") return new SimBackend(env.MAGPIE_LAYERFS_HOME)
-  throw new Error(`MAGPIE_LAYERFS_BACKEND is auto or sim in this package; got ${JSON.stringify(want)}`)
+  throw new Error(`the LayerFS backend setting is auto or sim in this package; got ${JSON.stringify(want)}`)
 }
