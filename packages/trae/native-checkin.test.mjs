@@ -33,6 +33,30 @@ test("a claim answering neither credit says so, and the status's is the fallback
   expect(await checkin()).toEqual({ outcome: "claimed" })
 })
 
+// zhujiu on magpie's Discord (10-25): a check-in shown as 200 points, when
+// the account got 100. The status is a real account's (yetone/magpie#808),
+// the claim's answer Trae CN's real one (plugins#194): it names no credit,
+// so the status's stands in, and its extra_credits is not added on top.
+test("a claim with no credit of its own is the status's credits, not credits plus extra_credits", async () => {
+  f = fakeTrae()
+  f.route("POST " + STATUS, () => json({ checked_in: false, code: 0, credits: 100, did_checked_in: false, enable: true, extra_credits: 100 }))
+  f.route("POST " + CLAIM, () => json({ code: 0, message: "success" }))
+  expect(await checkin()).toEqual({ outcome: "claimed", credit: 100 })
+})
+
+test("a claim naming both credits and extra_credits is its credits, once", async () => {
+  f = fakeTrae()
+  f.route("POST " + STATUS, () => json({ checked_in: false, code: 0, credits: 100, enable: true, extra_credits: 100 }))
+  f.route("POST " + CLAIM, () => json({ code: 0, credits: 100, extra_credits: 100 }))
+  expect(await checkin()).toEqual({ outcome: "claimed", credit: 100 })
+})
+
+test("an already-checked day with extra_credits is its credits", async () => {
+  f = fakeTrae()
+  f.route("POST " + STATUS, () => json({ checked_in: true, code: 0, credits: 100, did_checked_in: true, enable: true, extra_credits: 100 }))
+  expect(await checkin()).toEqual({ outcome: "done", credit: 100 })
+})
+
 test("a claimable day is claimed through Trae's own pages", async () => {
   f = fakeTrae()
   f.route("POST " + STATUS, () => json({ code: 0, enable: true, checked_in: false }))

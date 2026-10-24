@@ -2902,13 +2902,18 @@ const makePlugin = (site) => async ({ client }) => {
     if (String(ce.code) === "9074") return { outcome: "ineligible", message: `${ce.message} — check in in the Trae CN app` }
     if (claim.status !== 200 || (ce.code && String(ce.code) !== "0")) return { outcome: "failed", message: ce.message || statusLine(claim.status) }
     if (!answer || typeof answer !== "object" || Array.isArray(answer)) return { outcome: "failed", message: `check-in claim: unreadable reply ${claimText.trim().slice(0, 120) || "(empty)"}` }
-    // a claim may answer extra_credits with no credits beside it, and either
-    // may be absent: Number(undefined) is NaN, and NaN + n is NaN, which
-    // reads as no credit at all
+    // The credit is the day's credits, never credits plus extra_credits.
+    // Trae CN's real claim answers {"code":0,"message":"success"}, with no
+    // credit at all (plugins#194), so the status's credits stand in. Its
+    // status carries extra_credits beside credits, at the same 100 on a
+    // real account (yetone/magpie#808: credits 100, extra_credits 100),
+    // while the account gets 100: adding the two showed 200 (zhujiu on
+    // magpie's Discord, 10-25). A claim that names its own credit is
+    // taken first; one naming extra_credits alone is that (#260). Either
+    // may be absent, and Number(undefined) is NaN, which reads as none.
     const n = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0)
-    const credit = n(answer.credits) + n(answer.extra_credits)
-    const fallback = n(body.credits) + n(body.extra_credits)
-    return { outcome: "claimed", ...(credit > 0 ? { credit } : fallback > 0 ? { credit: fallback } : {}) }
+    const credit = n(answer.credits) || n(answer.extra_credits) || n(body.credits)
+    return { outcome: "claimed", ...(credit > 0 ? { credit } : {}) }
   }
 
   const usage = async (getAuth) => {
