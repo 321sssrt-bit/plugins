@@ -18,6 +18,18 @@ const CONFIG = 'https://www.kimi.com/apiv2/kimi.gateway.config.v1.ConfigService/
 const KIMI_CODE_VERSION = '0.36.0';
 const DAIMON_VERSION = '0.6.10';
 const UA = 'kimi-code-cli/' + KIMI_CODE_VERSION;
+// What Kimi's desktop sends www.kimi.com/apiv2 besides the sign-in (its
+// Connect interceptor: x-msh-platform "mac" or "windows" on the desktop,
+// "web" otherwise, x-msh-version the desktop's version, R-Timezone). They
+// are not decoration: asked without them DescribeKimiWorkConfig answers
+// with the web menu (k3-agent, k3-agent-swarm, k2d8-preview), and asked as
+// the desktop asks with its own (k3d1-agent, K3.1 Pro, first), so through
+// 0.1.8 K3.1 Pro was never listed (tests/fixtures/work-config.*.json).
+const DESKTOP_VERSION = '3.2.20';
+function webHeaders(platform=process.platform) {
+  return {'User-Agent':UA,'x-msh-platform':platform==='darwin'?'mac':platform==='win32'?'windows':'web',
+    'x-msh-version':DESKTOP_VERSION,'R-Timezone':Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC'};
+}
 const ascii = (v, fallback = 'unknown') => String(v ?? '').replace(/[^\x20-\x7e]/g, '').trim() || fallback;
 function deviceModel() {
   const t = os.type(), r = os.release(), a = os.arch();
@@ -287,11 +299,12 @@ function workConfigRows(payload) {
     const has=c=>Array.isArray(caps)&&caps.includes(c);
     const image=has('image_in'),thinking=has('thinking')||Object.keys(variants).length>0;
     const max=Number(pick(dc,'maxContextSize','max_context_size'))||262144;
+    const output=Number(pick(rp,'maxTokens','max_tokens'))||32768;
     out[id]={id,name:String(pick(display,'displayName','display_name')||'').trim()||id,
       api:{id,url:BASE,npm:'@ai-sdk/openai-compatible'},
       // Standard context, as /models' rows: XL is a header the desktop
       // sends only when the user picks it.
-      limit:{context:Math.min(max,262144),output:32768},
+      limit:{context:Math.min(max,262144),output},
       capabilities:{reasoning:thinking,toolcall:true,attachment:image,
         input:{text:true,image,video:false,audio:false,pdf:false},output:{text:true}},
       variants};
@@ -299,7 +312,7 @@ function workConfigRows(payload) {
   return out;
 }
 
-function createPlugin({readSession=readDesktop,fetchImpl=globalThis.fetch}={}) {
+function createPlugin({readSession=readDesktop,fetchImpl=globalThis.fetch,platform=process.platform}={}) {
   const current=auth=>{
     const session=readSession();
     if(auth?.source!=='kimi-work-desktop'||auth.uid!==session.uid)throw expired();
@@ -307,7 +320,7 @@ function createPlugin({readSession=readDesktop,fetchImpl=globalThis.fetch}={}) {
   };
   async function jsonRequest(url,token,body,signal,deviceId) {
     const response=await fetchImpl(url,{method:body===undefined?'GET':'POST',
-      headers:{Authorization:'Bearer '+token,...(url.startsWith(BASE)?workHeaders(deviceId):{'User-Agent':UA}),'Accept':'application/json',
+      headers:{Authorization:'Bearer '+token,...(url.startsWith(BASE)?workHeaders(deviceId):webHeaders(platform)),'Accept':'application/json',
         ...(body===undefined?{}:{'Content-Type':'application/json','Connect-Protocol-Version':'1'})},
       ...(body===undefined?{}:{body:JSON.stringify(body)}),signal:signal||AbortSignal.timeout(15000),redirect:'error'});
     if(response.status===401)throw expired();
@@ -405,4 +418,4 @@ function createPlugin({readSession=readDesktop,fetchImpl=globalThis.fetch}={}) {
 }
 
 export default async function KimiWorkProvider(){return createPlugin();}
-export const _internal={createPlugin,moonshotTools,moonshotSchema,readDesktop,desktopFile,modelRows,workConfigRows,BASE,MEMBER,CONFIG,UA,workHeaders,readDeviceId};
+export const _internal={createPlugin,moonshotTools,moonshotSchema,readDesktop,desktopFile,modelRows,workConfigRows,BASE,MEMBER,CONFIG,UA,workHeaders,webHeaders,readDeviceId};

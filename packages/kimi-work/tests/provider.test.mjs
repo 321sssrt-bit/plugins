@@ -168,3 +168,36 @@ test('either list failing leaves the other; both failing throws so the last good
   await expect(run(async()=>new Response('{}',{status:502}))).rejects.toThrow();
   await expect(run(async url=>url===I.CONFIG?json({models:[]}):new Response('{}',{status:502}))).rejects.toThrow();
 });
+
+// DescribeKimiWorkConfig's literal replies, captured 2026-10-24 from
+// www.kimi.com without a sign-in: the desktop's menu (x-msh-platform: mac;
+// "windows" answers the same) and the web's (x-msh-platform: web, or none).
+// Only the desktop's has K3.1 Pro, k3d1-agent (泠夜Soul's 99 plan, Discord).
+const fixture=name=>JSON.parse(fs.readFileSync(new URL('./fixtures/'+name,import.meta.url),'utf8'));
+const deskMenu=fixture('work-config.mac.json'),webMenu=fixture('work-config.web.json');
+test('the menu is asked as the desktop asks it, so K3.1 Pro (k3d1-agent) is listed',async()=>{
+  for(const [platform,said] of [['darwin','mac'],['win32','windows']]) {
+    const seen=[];
+    // Answers as www.kimi.com does: the desktop's menu only for its platforms.
+    const p=I.createPlugin({platform,readSession:()=>session,fetchImpl:async(url,init)=>{
+      if(url!==I.CONFIG)return json(modelPayload);
+      const h=init.headers['x-msh-platform'];seen.push(init.headers);
+      return json(h==='mac'||h==='windows'?deskMenu:webMenu);}});
+    const models=await p.provider.models({models:{}},{auth:account});
+    expect(Object.keys(models)).toEqual(['k3d1-agent','k2d8-preview','k3-agent']);
+    expect(models['k3d1-agent']).toMatchObject({id:'k3d1-agent',name:'K3.1 Pro',api:{id:'k3d1-agent',url:I.BASE},
+      limit:{context:262144,output:32768},capabilities:{reasoning:true,attachment:true}});
+    expect(Object.keys(models['k3d1-agent'].variants)).toEqual(['low','high','max']);
+    expect(seen[0]).toMatchObject({'x-msh-platform':said,'x-msh-version':'3.2.20',Authorization:'Bearer '+session.webToken});
+  }
+});
+
+test('the platform is the desktop\'s on macOS and Windows, and agent-gw gets none of the web headers',()=>{
+  expect(I.webHeaders('darwin')['x-msh-platform']).toBe('mac');
+  expect(I.webHeaders('win32')['x-msh-platform']).toBe('windows');
+  expect(I.webHeaders('linux')['x-msh-platform']).toBe('web');
+  expect(I.workHeaders('d')).not.toHaveProperty('x-msh-version');
+  expect(I.workHeaders('d')['X-Msh-Platform']).toBe('kimi-code-cli');
+  // The web menu, as a reply without the platform is, has no K3.1 Pro.
+  expect(Object.keys(I.workConfigRows(webMenu))).toEqual(['k3-agent','k3-agent-swarm','k2d8-preview']);
+});
