@@ -1572,3 +1572,15 @@ test("native: a Run parked for the caller's results longer than idle still conti
   expect(second.diagnostic).toMatch(/^same-run/)
   expect(a.runs).toHaveLength(1)
 })
+
+test("native: a continued Run that goes quiet after the caller's results ends within idle (#2672)", async () => {
+  NATIVE_LIMITS.idle = 150
+  const a = await agent({ finalAfterFirst: true, stallFinal: true }), account = auth(), chat = initial()
+  const first = await a.ask(account, chat)
+  expect(first.status).toBe(200)
+  expect(first.diagnostic).toMatch(/^same-run/)
+  const second = await a.ask(account, continueWith(chat, first.body, ["after the tool"]))
+  expect(second.status).toBe(502)
+  expect(second.body.error.message).toContain("Cursor went quiet: no message for")
+  expect(a.runs).toHaveLength(1)
+})
