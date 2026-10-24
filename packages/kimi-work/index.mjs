@@ -320,15 +320,40 @@ function createPlugin({readSession=readDesktop,fetchImpl=globalThis.fetch,platfo
   };
   async function jsonRequest(url,token,body,signal,deviceId) {
     const response=await fetchImpl(url,{method:body===undefined?'GET':'POST',
-      headers:{Authorization:'Bearer '+token,...(url.startsWith(BASE)?workHeaders(deviceId):webHeaders(platform)),'Accept':'application/json',
+      headers:{...(token?{Authorization:'Bearer '+token}:{}),...(url.startsWith(BASE)?workHeaders(deviceId):webHeaders(platform)),'Accept':'application/json',
         ...(body===undefined?{}:{'Content-Type':'application/json','Connect-Protocol-Version':'1'})},
       ...(body===undefined?{}:{body:JSON.stringify(body)}),signal:signal||AbortSignal.timeout(15000),redirect:'error'});
-    if(response.status===401)throw expired();
-    if(!response.ok)throw Error('Kimi Work 服务暂不可用（HTTP '+response.status+'）。');
+    if(response.status===401)throw Object.assign(expired(),{status:401});
+    if(!response.ok)throw Object.assign(Error('Kimi Work 服务暂不可用（HTTP '+response.status+'）。'),{status:response.status});
     if(Number(response.headers.get('content-length')||0)>2*1024*1024)throw Error('Kimi Work 响应过大。');
     const text=await response.text();
     if(Buffer.byteLength(text)>2*1024*1024)throw Error('Kimi Work 响应过大。');
     try{return JSON.parse(text);}catch{throw Error('Kimi Work 响应格式无效。');}
+  }
+  // Work's menu, as the desktop asks it with its web sign-in. When that
+  // ask fails (the web sign-in in Kimi's file has gone stale, which
+  // www.kimi.com answers 401 "invalid user token"; any other status; a
+  // reply with no models), the menu is asked again with no sign-in, as the
+  // desktop asks it before one: www.kimi.com answers that with the same
+  // desktop menu (tests/fixtures/work-config.mac.json, K3.1 Pro first).
+  // Through 0.1.9 a failed ask was dropped without a word, so the list was
+  // /models' alone (k3-agent, k2d8-preview) and K3.1 Pro was missing with
+  // nothing in the log. Each failure is logged now, without the token.
+  async function menu(s) {
+    let why='no web sign-in';
+    if(s.webToken) {
+      try {
+        const rows=workConfigRows(await jsonRequest(CONFIG,s.webToken,{}));
+        if(Object.keys(rows).length)return rows;
+        why='a reply with no models';
+      } catch(error) {why=error?.status?'HTTP '+error.status:(error?.name==='TimeoutError'?'timed out':error?.cause?.code||error?.message||String(error));}
+    }
+    console.warn('kimi-work: DescribeKimiWorkConfig with the web sign-in failed ('+why+'); asking it without one');
+    try {return workConfigRows(await jsonRequest(CONFIG,'',{}));}
+    catch(error) {
+      console.warn('kimi-work: DescribeKimiWorkConfig without a sign-in failed ('+(error?.status?'HTTP '+error.status:error?.message||String(error))+'); listing /models alone');
+      throw error;
+    }
   }
   return {
     config:async cfg=>{
@@ -404,7 +429,7 @@ function createPlugin({readSession=readDesktop,fetchImpl=globalThis.fetch,platfo
       // Both lists, the desktop's menu first. Either one failing leaves the
       // other; both failing throws, so the last good list is kept.
       const [cfgList,gw]=await Promise.allSettled([
-        s.webToken?jsonRequest(CONFIG,s.webToken,{}).then(workConfigRows):Promise.reject(Error('no web token')),
+        menu(s),
         jsonRequest(BASE+'/models',s.workToken,undefined,undefined,s.deviceId).then(modelRows)]);
       const a=cfgList.status==='fulfilled'?cfgList.value:{},b=gw.status==='fulfilled'?gw.value:{};
       if(gw.status==='rejected'&&!Object.keys(a).length)throw gw.reason;

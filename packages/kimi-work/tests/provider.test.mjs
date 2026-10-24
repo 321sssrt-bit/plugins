@@ -201,3 +201,34 @@ test('the platform is the desktop\'s on macOS and Windows, and agent-gw gets non
   // The web menu, as a reply without the platform is, has no K3.1 Pro.
   expect(Object.keys(I.workConfigRows(webMenu))).toEqual(['k3-agent','k3-agent-swarm','k2d8-preview']);
 });
+
+// www.kimi.com's literal answer to a web sign-in it no longer takes (seen
+// 2026-10-24 with a token it can't verify): 401, Connect "unauthenticated".
+const staleToken={code:'unauthenticated',message:'invalid user token: token signature is invalid: signature is invalid',
+  details:[{type:'common.error.v1.ErrorDetail',value:'CGQSLgoFZW4tVVMSJVNlc3Npb24gZXhwaXJlZC4gUGxlYXNlIGxvZyBpbiBhZ2Fpbi4',debug:{reason:'REASON_INVALID_AUTH_TOKEN'}}]};
+test('a menu the web sign-in can\'t get is asked again without it, so K3.1 Pro is still listed, and the failure is logged',async()=>{
+  const seen=[],logged=[];const warn=console.warn;console.warn=(...x)=>logged.push(x.join(' '));
+  try {
+    for(const reply of [()=>Response.json(staleToken,{status:401}),()=>new Response('',{status:503}),()=>json({models:[]})]) {
+      seen.length=0;logged.length=0;
+      // Answers as www.kimi.com does: the sign-in refused, the menu given
+      // to the desktop without one.
+      const p=I.createPlugin({platform:'darwin',readSession:()=>session,fetchImpl:async(url,init)=>{
+        if(url!==I.CONFIG)return json(modelPayload);
+        seen.push(init.headers);
+        return init.headers.Authorization?reply():json(deskMenu);}});
+      const models=await p.provider.models({models:{}},{auth:account});
+      expect(Object.keys(models)).toEqual(['k3d1-agent','k2d8-preview','k3-agent']);
+      expect(models['k3d1-agent'].name).toBe('K3.1 Pro');
+      expect(seen.map(h=>h.Authorization)).toEqual(['Bearer '+session.webToken,undefined]);
+      expect(seen[1]).toMatchObject({'x-msh-platform':'mac','x-msh-version':'3.2.20'});
+      expect(logged.join('\n')).toContain('DescribeKimiWorkConfig');
+      expect(logged.join('\n')).not.toContain(session.webToken);
+    }
+    // A sign-in it takes is asked once, and nothing is logged.
+    seen.length=0;logged.length=0;
+    await I.createPlugin({platform:'darwin',readSession:()=>session,fetchImpl:async(url,init)=>{
+      if(url!==I.CONFIG)return json(modelPayload);seen.push(init.headers);return json(deskMenu);}}).provider.models({models:{}},{auth:account});
+    expect(seen.length).toBe(1);expect(logged).toEqual([]);
+  } finally {console.warn=warn;}
+});
