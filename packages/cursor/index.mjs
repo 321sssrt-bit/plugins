@@ -1179,6 +1179,19 @@ function toolsOf(chat) {
     })
 }
 
+// NS is the MCP server the caller's tools are served as, the way Cursor's
+// own client names a user's server by its mcp.json label (providerIdentifier,
+// with "<label>-<tool>" as a call's name). It goes to Cursor in the prompt,
+// each call and each tool definition, so it names nothing of the plugin or
+// the app it runs in. Calls are read back under NAMESPACES: before 0.2.20
+// the server was named "magpie", and a session begun then can still call it.
+const NS = "tools"
+const NAMESPACES = [NS, "magpie"]
+const bareName = (s) => {
+  for (const ns of NAMESPACES) if (s.startsWith(ns + "-")) return s.slice(ns.length + 1)
+  return s
+}
+
 // catalog lists the caller's tools for the model. It sees MCP tools only
 // through Cursor's GetDynamicTools and CallDynamicTool, and Cursor names
 // them in a prompt of its own, which this conversation goes without:
@@ -1188,8 +1201,8 @@ function toolsOf(chat) {
 // those calls went nowhere (#11).
 function catalog(tools) {
   if (!tools.length) return ""
-  let s = `\n\n<dynamic_tool_catalog>\nThe MCP namespace "magpie" has the tools below. They are reached only through \`${CALL}\`, never as tools of their own. Each entry is the exact call to make; its arguments must match the schema given. The schemas are complete, so there is no need to call \`GetDynamicTools\` first.\n`
-  for (const t of tools) s += `<call>${CALL}({"namespace":"magpie","toolName":"${t.name}","arguments":{...}})\n${t.description}\narguments schema: ${t.schemaText}\n</call>\n`
+  let s = `\n\n<dynamic_tool_catalog>\nThe MCP namespace "${NS}" has the tools below. They are reached only through \`${CALL}\`, never as tools of their own. Each entry is the exact call to make; its arguments must match the schema given. The schemas are complete, so there is no need to call \`GetDynamicTools\` first.\n`
+  for (const t of tools) s += `<call>${CALL}({"namespace":"${NS}","toolName":"${t.name}","arguments":{...}})\n${t.description}\narguments schema: ${t.schemaText}\n</call>\n`
   return s + "</dynamic_tool_catalog>"
 }
 
@@ -1263,7 +1276,7 @@ function conversation(chat, tools) {
         if (c?.type && c.type !== "function") continue
         const args = parseArgs(c.function?.arguments)
         size += (c.function?.arguments ?? "").length + (c.function?.name ?? "").length
-        content.push({ type: "tool-call", toolCallId: callID(c.id), toolName: CALL, args: { namespace: "magpie", toolName: c.function?.name, arguments: args } })
+        content.push({ type: "tool-call", toolCallId: callID(c.id), toolName: CALL, args: { namespace: NS, toolName: c.function?.name, arguments: args } })
         pending.push(c.id)
       }
       if (content.length) add({ role: "assistant", content })
@@ -1303,7 +1316,7 @@ function toolDef(t) {
   const d = pb().str(1, t.name)
   if (t.description) d.str(2, t.description)
   d.bytes(3, pbValue(t.schema))
-  return d.str(4, "magpie").str(5, t.name).str(6, t.schemaText).done()
+  return d.str(4, NS).str(5, t.name).str(6, t.schemaText).done()
 }
 
 const env = () => pb().str(1, GOOS).str(2, tmpdir()).str(10, "UTC")
@@ -2527,13 +2540,13 @@ function exec(msg, tools, send, closeExec, refused, native = false) {
   if (native) for (const e of es) if (e.num === 11) {
     if (e.wire !== 2) throw new NativeSessionError(502, "invalid native MCP argument envelope")
     const { fields: a, args } = nativeMcpArgs(e.data)
-    const name = pbStr(a, 5) || pbStr(a, 1).replace(/^magpie-/, "")
+    const name = pbStr(a, 5) || bareName(pbStr(a, 1))
     const provider = pbStr(a, 4)
     const server = pbStr(a, 9)
-    if (provider && provider !== "magpie" || server && server !== "magpie") nativeUnavailable = true
+    if (provider && !NAMESPACES.includes(provider) || server && !NAMESPACES.includes(server)) nativeUnavailable = true
     if (pbNum(a, 7) || field(a, 6)) nativeUnavailable = true
     if (!tools.some((t) => t.name === name)) nativeUnavailable = true
-    if (!pbStr(a, 5) && pbStr(a, 1) !== "magpie-" + name) nativeUnavailable = true
+    if (!pbStr(a, 5) && !NAMESPACES.some((ns) => pbStr(a, 1) === ns + "-" + name)) nativeUnavailable = true
     const call = { requestID: id, execID, nativeID: pbStr(a, 3), name, args }
     if (nativeCall && !isDeepStrictEqual(nativeCall, call)) throw new NativeSessionError(502, "ambiguous repeated native MCP argument envelopes")
     nativeCall ??= call
@@ -2565,7 +2578,7 @@ function exec(msg, tools, send, closeExec, refused, native = false) {
           const v = field(ef, 2)
           args[pbStr(ef, 1)] = v ? pbAny(v.data) : null
         }
-        const name = pbStr(a, 5) || pbStr(a, 1).replace(/^magpie-/, "")
+        const name = pbStr(a, 5) || bareName(pbStr(a, 1))
         // an OpenAI model's id is its call's and its item's, a line apart,
         // which no caller would take as an id: the line goes as __
         const cid = pbStr(a, 3).replaceAll("\n", "__") || "call_" + randomBytes(12).toString("hex")
@@ -2573,7 +2586,7 @@ function exec(msg, tools, send, closeExec, refused, native = false) {
       }
       case 36: {
         // mcp_state_exec_args: the tools there are
-        const srv = pb().str(1, "magpie").str(2, "magpie").str(7, "connected")
+        const srv = pb().str(1, NS).str(2, NS).str(7, "connected")
         for (const t of tools) srv.bytes(5, toolDef(t))
         answer(36, pb().bytes(1, pb().bytes(1, srv)))
         return null
