@@ -892,6 +892,13 @@ const TASKS = new Map()
 const TASK_MAX = 512
 const TASK_IDLE = 2 * 60 * 60 * 1000
 
+// taskName is the business record's name for a task whose prompt is
+// prompt, as Qoder's client names an agent task: the prompt's first ten
+// characters (qoder-agent-sdk's AgentLifecycle, hdr → C6s: type
+// "code_review" takes the session id, every other the prompt, sliced to
+// 10 when longer).
+const taskName = (prompt) => (prompt.length > 10 ? prompt.slice(0, 10) : prompt)
+
 // taskOf is the task chat's call belongs to, in session sid: made on its
 // first call, the same one on every call after.
 function taskOf(sid, chat, now = Date.now()) {
@@ -905,7 +912,7 @@ function taskOf(sid, chat, now = Date.now()) {
   let t = TASKS.get(key)
   if (t && now - t.used > TASK_IDLE) t = undefined
   TASKS.delete(key)
-  t ??= { id: randomUUID(), begin: now, answered: false }
+  t ??= { id: randomUUID(), begin: now, answered: false, name: taskName(at < 0 ? "" : textOf(msgs[at].content)) }
   t.used = now
   TASKS.set(key, t)
   while (TASKS.size > TASK_MAX) TASKS.delete(TASKS.keys().next().value)
@@ -936,7 +943,7 @@ function qoderBody(chat, m, named = "", task) {
     chat_record_id: request,
     session_id: session,
     parameters: params,
-    business: { product: "app", version: COSY_VERSION, type: "agent", id: task.id, name: "magpie session", begin_at: task.begin, stage: task.answered ? "processing" : "start" },
+    business: { product: "app", version: COSY_VERSION, type: "agent", id: task.id, name: task.name ?? "", begin_at: task.begin, stage: task.answered ? "processing" : "start" },
     agent_id: "agent_common",
     task_id: "common",
     session_type: "app",
