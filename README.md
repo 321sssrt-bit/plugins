@@ -151,11 +151,13 @@ Agent skills for magpie users, in `skills/<name>/SKILL.md`.
 
 | Skill | What it does |
 |---|---|
+| [magpie-setup](skills/magpie-setup) | Lets an agent set magpie up as the user asks, through its own `magpie` commands: keys and subscriptions, an agent's model, routing groups with fallbacks and time-of-day rules, gateway keys with budgets, and MCP servers and instructions shared with every agent |
 | [magpie-quota](skills/magpie-quota) | Lets an agent check what is left of every subscription, coding plan and key balance magpie has (`magpie quota --json`), and wait for allowance to come back |
 
-In magpie, it is first under Library › Market › Skills. Elsewhere:
+In magpie, they are first under Library › Market › Skills. Elsewhere:
 
 ```sh
+npx skills add magpie-community/plugins --skill magpie-setup
 npx skills add magpie-community/plugins --skill magpie-quota
 ```
 
