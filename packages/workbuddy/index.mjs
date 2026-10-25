@@ -1598,9 +1598,11 @@ const compact = (n) => (Number.isInteger(n) ? String(n) : n.toFixed(2).replace(/
 // usageOf is the account's credits, from its resource summary: the plan's
 // credits used against what the cycle grants, as magpie's built-in said —
 // the count itself too (amount of limit, in credits), for magpie to say it
-// as used or left beside the share (magpie#659).
+// as used or left beside the share (magpie#659). The free plan is said as a
+// plan: "Free" alone beside the account read as the model being free, and
+// routing as preferring it for that (#337).
 function usageOf(sum, plan) {
-  const out = { plan: plan || (sum?.IsPaidUser ? "Pro" : "Free"), windows: [] }
+  const out = { plan: plan || (sum?.IsPaidUser ? "Pro" : "Free plan"), windows: [] }
   let total = 0, used = 0
   for (const p of sum?.Packages ?? []) {
     total += capacity(p?.CycleTotalCapacity)
