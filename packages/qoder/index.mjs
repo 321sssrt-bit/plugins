@@ -1273,8 +1273,9 @@ const FUNC = /\x3cfunction=([^>]+)\x3e([\s\S]*?)\x3c\/function\x3e/
 const PARAM = /\x3cparameter=([^>]+)\x3e([\s\S]*?)\x3c\/parameter\x3e/g
 
 // parseCall reads one tool-call block: JSON {name, arguments}, or the XML
-// function/parameter form.
-function parseCall(v) {
+// function/parameter form, its values typed as the tool's schema says
+// (xmlArgs).
+function parseCall(v, tools = []) {
   try {
     const f = JSON.parse(v.trim())
     if (String(f?.name ?? "").trim() && f.arguments && typeof f.arguments === "object" && !Array.isArray(f.arguments))
@@ -1282,18 +1283,106 @@ function parseCall(v) {
   } catch {}
   const m = FUNC.exec(v)
   if (!m || !m[1].trim()) return null
+  const name = m[1].trim()
+  const props = propsOf(tools, name)
   const args = {}
   for (const pm of m[2].matchAll(PARAM)) {
     const key = pm[1].trim()
     if (!key) continue
-    const val = pm[2].trim()
-    try {
-      args[key] = JSON.parse(val)
-    } catch {
-      args[key] = val
-    }
+    args[key] = valueOf(pm[2].trim(), props[key])
   }
-  return { name: m[1].trim(), args: JSON.stringify(args) }
+  return { name, args: JSON.stringify(args) }
+}
+
+// propsOf is the parameters the request declared for tool name
+const propsOf = (tools, name) => (tools.find((t) => (t.function ?? t)?.name === name)?.function ?? {}).parameters?.properties ?? {}
+
+// valueOf is a parameter's value: its text where the tool's schema says
+// string, else its JSON (an array a tool takes), else its text (#323: a
+// string holding [1, 2] became an array)
+function valueOf(v, prop) {
+  if (prop?.type === "string") return v
+  try {
+    return JSON.parse(v.trim())
+  } catch {
+    return v
+  }
+}
+
+// Anthropic's and Qwen's call tags, written bare (no <tool_call> around
+// them), as Kimi, MiMo and Qwen models may (#323, as trae's since 0.2.19):
+// where one starts, an opener still being written, the openers a wrapper
+// is followed by, the next call's opener, a parameter's opener, and what
+// is left after a call
+const XML_AT = /<(?:antml:)?(?:function_calls>|invoke\s+name\s*=|function=)/
+const XML_HOLD = /<(?:antml:)?(?:invoke\s[^<>]{0,300}|function=[^<>]{0,300})$/
+const XML_STARTS = ["<invoke ", "<antml:invoke ", "<function="]
+const XML_MARKS = ["<function_calls>", "<antml:function_calls>", ...XML_STARTS]
+const XML_NEXT = /<(?:antml:)?invoke\s+name\s*=|<function=/
+const XML_PARAM = /<(?:antml:)?parameter(?:\s+name\s*=\s*"([^"]+)"|=([^\s>]+))\s*>/g
+const XML_CLOSES = ["</function_calls>", "</antml:function_calls>", "</invoke>", "</antml:invoke>", "</function>"]
+const XML_LEFT = /^(?:\s+|<\/(?:antml:)?(?:function_calls|invoke|function)>)+/
+
+// xmlArgs reads the parameters of an invoke or function body, typed by
+// the tool's schema; closed is whether every one was closed
+function xmlArgs(s, props) {
+  const opens = [...s.matchAll(XML_PARAM)]
+  const args = {}
+  let closed = opens.length > 0
+  opens.forEach((m, k) => {
+    let v = s.slice(m.index + m[0].length, k + 1 < opens.length ? opens[k + 1].index : s.length)
+    const c = v.search(/<\/(?:antml:)?parameter>/)
+    if (c >= 0) v = v.slice(0, c)
+    else closed = false
+    args[m[1] ?? m[2]] = valueOf(v.replace(/^\r?\n|\r?\n$/g, ""), props[m[1] ?? m[2]])
+  })
+  return { args, closed }
+}
+
+// xmlCall reads a bare call in Anthropic's tags (<function_calls> around
+// one or more <invoke name="…"><parameter name="k">v</parameter>
+// </invoke>) or Qwen's (<function=…><parameter=k>v</parameter>
+// </function>), s starting at its first tag: {call, rest}, {wait} while
+// it may still become one, {text} when it is no call (a tool the request
+// didn't declare, a tag named in prose), {error} for one cut short. Only
+// a declared tool's call counts: these tags are common in prose.
+function xmlCall(s, end, tools) {
+  const w = s.match(/^<(?:antml:)?function_calls>/)
+  if (w) {
+    const rest = s.slice(w[0].length).replace(/^\s+/, "")
+    if (!end && (!rest || XML_STARTS.some((k) => k.startsWith(rest)))) return { wait: true }
+    s = rest
+  }
+  let m = s.match(/^<(?:antml:)?invoke\s+name\s*=\s*"([^"<>]+)"\s*>/)
+  let closeRe = /<\/(?:antml:)?invoke\s*>/
+  if (!m) {
+    m = s.match(/^<function=([^\s<>]+?)\s*>/)
+    closeRe = /<\/function\s*>/
+  }
+  if (!m) {
+    if (!end && (XML_STARTS.some((k) => k.startsWith(s)) || /^<(?:antml:)?(?:invoke\s|function=)[^<>]{0,300}$/.test(s))) return { wait: true }
+    return { text: true }
+  }
+  const name = m[1].trim()
+  if (!tools.some((t) => (t.function ?? t)?.name === name)) return { text: true }
+  const body = s.slice(m[0].length)
+  const c = body.match(closeRe)
+  const n = body.search(XML_NEXT)
+  let stop = c ? c.index : -1
+  if (n >= 0 && (stop < 0 || n < stop)) stop = n
+  if (stop < 0) {
+    if (!end) return { wait: true }
+    stop = body.length
+  }
+  const whole = !!c && c.index === stop
+  const p = xmlArgs(body.slice(0, stop), propsOf(tools, name))
+  if (!whole && !p.closed) {
+    // no parameter and no close: a tag named in passing; a parameter
+    // left open: the call cut short
+    if (!/<(?:antml:)?parameter\b/.test(body.slice(0, stop))) return { text: true }
+    return { error: CUT_SHORT }
+  }
+  return { call: { name, args: JSON.stringify(p.args) }, rest: whole ? body.slice(stop + c[0].length) : body.slice(stop) }
 }
 
 // quoted says text ends inside a code fence or an inline code span: a
@@ -1316,31 +1405,96 @@ const UNREADABLE = "the model's tool call, written as text, can't be read; it is
 // that the stream ended inside, is an error, never the answer (plugins#132,
 // as trae's since plugins#38): the turn fails so it can be tried again. A
 // block whose JSON is whole when the stream ends without its close is still
-// the call; one that is no call at all, or one in code, stays text.
+// the call; one that is no call at all, or one in code, stays text. A bare
+// call in Anthropic's or Qwen's tags (xmlCall) is a call too, for a tool
+// the request declared (tools).
 class Splitter {
   textBuf = ""
   callBuf = ""
   inCall = false
   sawTool = false
+  after = false // a bare call just ended: the closes and blanks after it are dropped
   sent = "" // the text given out so far, to tell a block in code from a call
+  constructor(tools = []) {
+    this.tools = tools.filter((t) => (t?.function ?? t)?.name)
+  }
   text(out, t) {
     this.sent += t
     out.push({ text: t })
+  }
+  // bare reads text that may hold a bare call, comb starting at its tag x:
+  // the input left to read, null when comb is held for more, or false
+  // when the turn ended in an error
+  bare(out, comb, x, end) {
+    const head = comb.slice(0, x)
+    const at = comb.slice(x)
+    const opener = at.match(/^<[^<>]*>?/)[0]
+    if (quoted(this.sent + head)) {
+      this.text(out, head + opener)
+      return at.slice(opener.length)
+    }
+    const b = xmlCall(at, end, this.tools)
+    if (b.wait) {
+      if (head) this.text(out, head)
+      this.textBuf = at
+      return null
+    }
+    if (b.text) {
+      this.text(out, head + opener)
+      return at.slice(opener.length)
+    }
+    if (head) this.text(out, head)
+    if (b.error) {
+      out.push({ error: b.error })
+      return false
+    }
+    this.sawTool = true
+    out.push({ call: b.call })
+    this.after = true
+    return b.rest
+  }
+  // left drops what is left after a bare call; null while it may still be
+  // one of its closes
+  left(comb, end) {
+    const rest = comb.replace(XML_LEFT, "")
+    if (!end && (!rest || XML_CLOSES.some((c) => c.length > rest.length && c.startsWith(rest)))) return null
+    this.after = false
+    return rest
   }
   feed(input) {
     const out = []
     while (input) {
       if (!this.inCall) {
-        const comb = this.textBuf + input
+        let comb = this.textBuf + input
         this.textBuf = ""
+        if (this.after) {
+          const rest = this.left(comb, false)
+          if (rest === null) {
+            this.textBuf = comb
+            break
+          }
+          comb = rest
+          if (!comb) break
+        }
         const i = comb.indexOf(CALL_OPEN)
+        const x = this.tools.length ? comb.search(XML_AT) : -1
+        if (x >= 0 && (i < 0 || x < i)) {
+          const next = this.bare(out, comb, x, false)
+          if (next === false) return out
+          if (next === null) break
+          input = next
+          continue
+        }
         if (i < 0) {
           let keep = 0
-          for (let n = CALL_OPEN.length - 1; n > 0; n--)
-            if (comb.endsWith(CALL_OPEN.slice(0, n))) {
-              keep = n
-              break
-            }
+          for (const mark of this.tools.length ? [CALL_OPEN, ...XML_MARKS] : [CALL_OPEN])
+            for (let n = Math.min(mark.length - 1, comb.length); n > keep; n--)
+              if (comb.endsWith(mark.slice(0, n))) {
+                keep = n
+                break
+              }
+          const h = this.tools.length ? comb.search(XML_HOLD) : -1
+          if (h >= 0) keep = Math.max(keep, comb.length - h)
           if (keep < comb.length) this.text(out, comb.slice(0, comb.length - keep))
           this.textBuf = comb.slice(comb.length - keep)
           break
@@ -1358,7 +1512,7 @@ class Splitter {
         break
       }
       const body = comb.slice(0, j)
-      const c = parseCall(body)
+      const c = parseCall(body, this.tools)
       if (c) {
         this.sawTool = true
         out.push({ call: c })
@@ -1378,7 +1532,7 @@ class Splitter {
       this.inCall = false
       this.callBuf = ""
       if (callish(body) && !quoted(this.sent)) {
-        const c = parseCall(body)
+        const c = parseCall(body, this.tools)
         if (!c) return [{ error: CUT_SHORT }]
         this.sawTool = true
         return [{ call: c }]
@@ -1388,10 +1542,23 @@ class Splitter {
       return [{ text: t }]
     }
     if (this.textBuf) {
-      const t = this.textBuf
+      let t = this.textBuf
       this.textBuf = ""
-      this.sent += t
-      return [{ text: t }]
+      if (this.after) t = this.left(t, true)
+      // what was held for a bare call, read to its end: calls, then the
+      // text left, or the error of one cut short
+      const out = []
+      while (t) {
+        const x = this.tools.length ? t.search(XML_AT) : -1
+        if (x < 0) {
+          this.text(out, t)
+          break
+        }
+        const next = this.bare(out, t, x, true)
+        if (next === false) break
+        t = this.after ? this.left(next, true) : next
+      }
+      return out
     }
     return []
   }
@@ -1414,8 +1581,8 @@ async function* sseLines(body) {
 // events turns Qoder's SSE into chat completion pieces: each data line's
 // envelope has a "body" that is an OpenAI chunk, whose content may hold
 // tool calls to lift out.
-async function* events(body) {
-  const a = new Splitter()
+async function* events(body, tools = []) {
+  const a = new Splitter(tools)
   let index = -1 // the tool call being given
   const native = new Map() // upstream index -> call and its output index
   // one piece of the split text as an event: a call, text, or a call that
@@ -1513,8 +1680,8 @@ async function* events(body) {
 // opened is a chat reply's events and the first of them, read before
 // anything is answered: a refusal in the stream (Qoder's queue among them)
 // comes first.
-async function opened(res) {
-  const it = events(res.body)
+async function opened(res, tools) {
+  const it = events(res.body, tools)
   return { it, first: await it.next() }
 }
 
@@ -2365,7 +2532,7 @@ const makePlugin = (site) => async ({ client }) => {
       let res, open
       try {
         res = await fetch(CHAT_URL, { method: "POST", headers, body: wire, signal: init.signal })
-        if (res.ok) open = await opened(res)
+        if (res.ok) open = await opened(res, chat.tool_choice !== "none" ? (chat.tools ?? []).filter((t) => t?.type === "function") : [])
       } catch (e) {
         return errorResponse({ status: 502, message: e.message })
       }
@@ -2621,4 +2788,4 @@ export async function QwenWorkEnterpriseAuthPlugin({ client }) {
 export const protocol = { makePlugin, deviceSignIn, openapi, siteOf }
 
 // for tests
-export const _internal = { typedUnions, campaignRuntime, RUNTIMES, campaignPage, campaignTarget, vpcInstance, vpcSite, parseUsage, gfmt, when, failure, modelInfo, qoderBody, qoderMessages, cacheMarked, sessionOf, namedSession, taskOf, TASKS, TASK_MAX, TASK_IDLE, SESSION, SITES, decodeBody, events, QUEUE, queueState }
+export const _internal = { typedUnions, Splitter, campaignRuntime, RUNTIMES, campaignPage, campaignTarget, vpcInstance, vpcSite, parseUsage, gfmt, when, failure, modelInfo, qoderBody, qoderMessages, cacheMarked, sessionOf, namedSession, taskOf, TASKS, TASK_MAX, TASK_IDLE, SESSION, SITES, decodeBody, events, QUEUE, queueState }

@@ -144,6 +144,13 @@ itself.
   the agent or magpie can try again. A call whose JSON is whole when the
   stream ends without its close is still the call; a tag in code or prose
   stays text.
+- A call written in Anthropic's or Qwen's tags with no `<tool_call>`
+  around it (since 0.2.36, #323), `<function_calls>` around one or more
+  `<invoke name="…"><parameter name="k">v</parameter></invoke>`, or
+  `<function=name><parameter=k>v</parameter></function>`, is a call too,
+  but only for a tool the request declared; for any other, or in
+  backticks or a code fence, it stays text. A parameter's value is JSON
+  unless the tool's schema says string, in these and in `<tool_call>`.
 
 **Errors**
 
