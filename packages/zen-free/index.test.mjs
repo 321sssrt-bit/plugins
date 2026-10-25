@@ -637,3 +637,72 @@ test("asks the inference API, also for a model listed at /zen/v1", async (t) => 
   }
   assert.ok(!asked.some((url) => url.startsWith("https://opencode.ai/zen/")), asked.join("\n"));
 });
+
+// Zen's free tier serves a request as OpenCode's only with OpenCode's
+// environment block in a system message; without it an agent's request
+// (Kimi Work's, WorkBuddy's) is 429 FreeUsageLimitError after a small
+// daily allowance, while OpenCode's own goes through (杨梅 on magpie's
+// Discord, 2026-10-25).
+const ENV = /<env>[\s\S]*Working directory:[\s\S]*<\/env>/;
+const systemText = (protocol, body) => {
+  const text = (content) =>
+    typeof content === "string" ? content : (content ?? []).map((part) => part.text).join("\n");
+  if (protocol === "anthropic") return text(body.system);
+  if (protocol === "responses")
+    return [
+      body.instructions ?? "",
+      ...(body.input ?? []).filter((m) => ["system", "developer"].includes(m.role)).map((m) => text(m.content)),
+    ].join("\n");
+  return body.messages.filter((m) => m.role === "system").map((m) => text(m.content)).join("\n");
+};
+const agentPrompt = "You are WorkBuddy. Help the user.";
+const withPrompt = (protocol, prompt, user) =>
+  protocol === "anthropic"
+    ? { ...(prompt === undefined ? {} : { system: prompt }), messages: [{ role: "user", content: user }] }
+    : protocol === "responses"
+      ? Array.isArray(prompt)
+        ? { input: [{ role: "system", content: prompt }, { role: "user", content: user }] }
+        : { ...(prompt === undefined ? {} : { instructions: prompt }), input: [{ role: "user", content: user }] }
+      : {
+          messages: [
+            ...(prompt === undefined ? [] : [{ role: "system", content: prompt }]),
+            { role: "user", content: user },
+          ],
+        };
+
+for (const { protocol, path, model } of protocols) {
+  test(`${protocol}: an agent's own prompt goes with OpenCode's environment block, once`, async (t) => {
+    const { plugin, state, origin } = await fixture(t);
+    await plugin.provider.models({ models: {} }, { auth: await publicAuth() });
+    const loader = await plugin.auth.loader(publicAuth);
+    const send = async (body) => {
+      const response = await loader.fetch(`${origin}/v1/${path}`, {
+        method: "POST",
+        body: JSON.stringify({ model, stream: true, ...body }),
+      });
+      await response.text();
+      return state.calls.at(-1).body;
+    };
+    // the agent's prompt is kept, first, and the block follows it
+    let sent = await send(withPrompt(protocol, agentPrompt, "hello"));
+    let system = systemText(protocol, sent);
+    assert.match(system, ENV);
+    assert.ok(system.startsWith(agentPrompt), system);
+    assert.equal(system.match(/<env>/g).length, 1);
+    if (protocol === "chat") assert.equal(sent.messages.filter((m) => m.role === "system").length, 1);
+    // an agent that sent no prompt gets one holding the block
+    sent = await send(withPrompt(protocol, undefined, "hello"));
+    assert.match(systemText(protocol, sent), ENV);
+    if (protocol === "chat") assert.equal(sent.messages[0].role, "system");
+    // a prompt in parts gets a part of its own
+    sent = await send(withPrompt(protocol, [{ type: "text", text: agentPrompt }], "hello"));
+    assert.match(systemText(protocol, sent), ENV);
+    // the block in a user message doesn't count with Zen, so it is added
+    sent = await send(withPrompt(protocol, agentPrompt, "<env>\n  Working directory: /x\n</env>"));
+    assert.match(systemText(protocol, sent), ENV);
+    // OpenCode's own prompt already has one, and gets no second
+    const own = `${agentPrompt}\n<env>\n  Working directory: /Users/me/project\n</env>`;
+    sent = await send(withPrompt(protocol, own, "hello"));
+    assert.equal(systemText(protocol, sent), own);
+  });
+}

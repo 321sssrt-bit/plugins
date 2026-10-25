@@ -74,6 +74,16 @@ itself (`bash`, `edit`, `glob`, `grep`, `read`), described as not
 available. A call of one of them the agent doesn't have reaches the agent
 like any other.
 
+Zen's free tier also tells OpenCode's own requests by the environment
+block every OpenCode prompt ends with (`<env>`, a `Working directory:`
+line, `</env>`) in a system message. Another agent's request without one
+gets a small allowance a day and then `429 FreeUsageLimitError` ("Free
+models work in OpenCode") until 00:00 UTC, while OpenCode's go through.
+So a request whose system messages have no such block gets one added
+after the agent's own prompt (Anthropic `system` and Responses
+`instructions` likewise), its working directory said as unknown; a
+prompt that has one, as OpenCode's does, goes as it is.
+
 Now and then Zen closes a streamed Chat Completions reply before its
 `[DONE]`. When the reply has said something and no tool call of it is
 unfinished, it ends there as an ordinary answer, and its text says it was
