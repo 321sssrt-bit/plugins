@@ -612,6 +612,27 @@ test("signinOnUsage signs every account, also two with the same name", async () 
   }
 })
 
+// #376 (moxuanchen): the credits are a bare balance, with no limit and no
+// amount used; as a used: 0 window the card read "500 积分 · 剩余 100%"
+test("usage: the credit balance and its wallets are the balance, never a window with a share", async () => {
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async (input) => {
+    const u = String(input)
+    if (u.includes("wallets")) return Response.json({ code: 0, data: { total_balance: 1234.4, wallets: [
+      { display_name: "赠送积分", balance: 500 }, { display_name: "会员积分", balance: 734.4 }, { display_name: "空", balance: 0 },
+    ] } })
+    return Response.json({ code: 0, data: null })
+  }
+  try {
+    const hooks = await AutoclawAuthPlugin({ client: { auth: { set: async () => {} } } })
+    const u = await hooks.auth.usage(async () => ({ type: "oauth", access: "a1" }))
+    expect(u.balance).toBe("1234 积分（赠送积分 500 · 会员积分 734）")
+    expect(u.windows.filter((w) => w.name !== "每日签到")).toEqual([])
+  } finally {
+    globalThis.fetch = realFetch
+  }
+})
+
 // #367 (menhouran): the overseas gateway answers X-Tm "linux" with
 // 403 {"message":"forbidden"} for a valid token; the official Linux client
 // sends "linux-x64", which it takes

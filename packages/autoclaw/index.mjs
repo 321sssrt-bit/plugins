@@ -822,13 +822,13 @@ function makeAutoclawPlugin({ providerId, providerName, homeHost, loginMethod })
               }]
             : [];
 
+          // 积分是纯余额，没有总量也没有已用量：只放在 balance 里。做成
+          // used: 0 的窗口，卡片会给它配上「剩余 100%」（#376）。细分钱包
+          // 一并写进 balance。
+          const parts = named.map((w) => `${w.name} ${Math.round(w.balance)}`);
           return {
-            balance: `${Math.round(total)} 积分`,
-            windows: [
-              { name: "积分余额", used: 0, display: `${Math.round(total)} 积分`, aside: true },
-              ...signinWindow,
-              ...named.map((w) => ({ name: w.name, used: 0, display: `${Math.round(w.balance)}`, aside: true })),
-            ],
+            balance: `${Math.round(total)} 积分${parts.length ? `（${parts.join(" · ")}）` : ""}`,
+            windows: signinWindow,
           };
         } catch (e) {
           if (e?.banned) return { error: e.message, signIn: "kept", windows: [] };
