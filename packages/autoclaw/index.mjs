@@ -29,8 +29,14 @@ const CHANNEL = "AutoClaw4";
 const CLIENT_VERSION = "1.18.1";
 const CN_CHANNEL = "AutoClaw26";
 const CN_CLIENT_VERSION = "2.1.0";
-const PLATFORM_TM = process.platform === "darwin" ? "mac" : process.platform === "win32" ? "win" : "linux";
-const USER_AGENT = `AutoClaw/${CLIENT_VERSION} (${PLATFORM_TM}-${process.arch})`;
+const PLATFORM = process.platform === "darwin" ? "mac" : process.platform === "win32" ? "win" : "linux";
+/** X-Tm: the official Linux client sends "linux-x64"; the overseas gateway
+ * answers the bare "linux" with 403 {"message":"forbidden"} (#367). */
+function platformTm(platform = process.platform) {
+  return platform === "darwin" ? "mac" : platform === "win32" ? "win" : "linux-x64";
+}
+const PLATFORM_TM = platformTm();
+const USER_AGENT = `AutoClaw/${CLIENT_VERSION} (${PLATFORM}-${process.arch})`;
 
 const GLOBAL_HOST = "https://autoglm-api.autoglm.ai";
 const CN_HOST = "https://autoglm-api.zhipuai.cn";
@@ -619,7 +625,7 @@ function managedHeaders(token, model) {
   const rid = randomHex(16);
   const headers = new Headers(bizHeaders());
   headers.set("Accept", "application/json");
-  headers.set("User-Agent", `AutoClaw/${CN_CLIENT_VERSION} (${PLATFORM_TM}-${process.arch})`);
+  headers.set("User-Agent", `AutoClaw/${CN_CLIENT_VERSION} (${PLATFORM}-${process.arch})`);
   headers.set("X-Channel", CN_CHANNEL);
   headers.set("X-Version", CN_CLIENT_VERSION);
   headers.set("X-Trace-Id", rid);
@@ -1342,7 +1348,7 @@ export const AutoclawCnAuthPlugin = makeAutoclawPlugin({
 export const _internal = {
   quotaRefusal, accountRefusal, bannedSaid,
   makePluginForTest: makeAutoclawPlugin,
-  md5Hex, jwtClaim, tokenFields, codeValue, bizHeaders, bareToken, newDeviceId,
+  platformTm, md5Hex, jwtClaim, tokenFields, codeValue, bizHeaders, bareToken, newDeviceId,
   dailySignin, signinStatus, maybeSignin, signinAccountKey, signinConfig, checkinOutcome, refreshTokens,
   fetchUserProfile, accountDeviceId, accountDisplayName, startLocalOAuth,
   FLAGGED, unflagged, unflag, autoclawRewriteBody, explained, OFFICIAL_SYSTEM_PROMPT, REFUSED_HINT,
