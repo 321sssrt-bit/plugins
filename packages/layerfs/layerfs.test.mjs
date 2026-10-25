@@ -23,11 +23,14 @@ function mkTmp(prefix, base = tmpdir()) {
   tmpDirs.push(d)
   return d
 }
+// The cleanup's time grows with the machine's disk load, not with the
+// suite: on a loaded box removing every dir took over bun's default 5s
+// hook bar (#362), so the hook carries its own.
 afterAll(() => {
   for (const d of tmpDirs) rmSync(d, { recursive: true, force: true })
   for (const k of Object.keys(process.env)) if (!(k in envSnapshot)) delete process.env[k]
   Object.assign(process.env, envSnapshot)
-})
+}, 120_000)
 
 function fixture() {
   const src = mkTmp("layerfs-src-")
