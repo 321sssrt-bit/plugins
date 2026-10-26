@@ -33,13 +33,17 @@ const CORE_PARAMETER = {
   grep: "pattern",
   read: "filePath",
 };
-const OPENCODE_VERSION = "1.19.0";
-// What OpenCode 1.19.0 sends as its User-Agent, ai-sdk and Bun included.
-// Each protocol's ai-sdk package bundles its own provider-utils, so the
-// version differs by protocol (captured from the release binary's requests).
-const PROVIDER_UTILS = { chat: "4.0.23", responses: "4.0.40", anthropic: "4.0.46" };
-export function userAgent(protocol) {
-  return `opencode/${OPENCODE_VERSION} ai-sdk/provider-utils/${PROVIDER_UTILS[protocol]} runtime/bun/1.3.14`;
+// What OpenCode 2.0.25 sends as its User-Agent on every protocol:
+// `opencode/${channel}/${version}/${name}` (its App service, read from the
+// release binary and captured from its requests on 2026-10-25). Since
+// 2026-10-26 Zen's free tier answers 429 FreeUsageLimitError ("Free models
+// work in OpenCode") to the exact User-Agent 0.1.6 to 0.1.15 sent, OpenCode
+// 1.19.0's `opencode/1.19.0 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.14`,
+// whatever the body says; the same request under any other string, OpenCode
+// 2.0.25's included, is served.
+const OPENCODE_VERSION = "2.0.25";
+export function userAgent() {
+  return `opencode/latest/${OPENCODE_VERSION}/cli`;
 }
 // How long a request for a model the last list didn't have waits before it
 // asks Zen's list again: a model Zen made free since is served at once,
@@ -375,24 +379,24 @@ async function server(_input, options = {}) {
             addEnvironment(body, protocol);
             if (protocol === "chat")
               body.stream_options = { ...body.stream_options, include_usage: true };
-            // Only what OpenCode 1.19.0 itself sends to its gateway, so a
-            // caller's own headers (an agent's User-Agent, x-stainless-*,
-            // x-session-affinity, ...) never mark the request as not
-            // OpenCode's (packages/opencode/src/session/llm/request.ts).
+            // Only what OpenCode 2.0.25 itself sends to its gateway, so a
+            // caller's own headers (an agent's User-Agent, x-stainless-*, ...)
+            // never mark the request as not OpenCode's.
             const given = request.headers;
             const session = sessionID(given, body);
             const project = _input?.project;
             const headers = new Headers({
               "content-type": "application/json",
               accept: "*/*",
-              "user-agent": userAgent(protocol),
+              "user-agent": userAgent(),
               "x-opencode-project":
                 given.get("x-opencode-project") ||
                 (project?.vcs === "git" && project.id ? project.id : "global"),
               "x-opencode-session": session,
-              "x-opencode-request": opencodeID("msg", false),
               "x-opencode-client": "cli",
               "x-opencode-session-id": session,
+              "x-session-affinity": session,
+              "x-session-id": session,
             });
             if (protocol === "anthropic") {
               headers.set("x-api-key", "public");

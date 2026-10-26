@@ -6,8 +6,15 @@ OpenCode Zen's free models in magpie and OpenCode. Provider id:
 Since 2026-10-13 Zen's free tier answers 403 FreeTierError ("can only be
 used from within OpenCode") to a request that isn't OpenCode's. From
 0.1.6 the plugin sends a free-model request with exactly the headers
-OpenCode 1.19.0 sends to Zen, and a session id of OpenCode's own form.
-Older versions (0.1.1 on npm before it) get the 403: update the plugin.
+OpenCode sends to Zen, and a session id of OpenCode's own form. Older
+versions (0.1.1 on npm before it) get the 403: update the plugin.
+
+Since 2026-10-26 Zen's free tier answers `429 FreeUsageLimitError`
+("Free models work in OpenCode") to the User-Agent OpenCode 1.19.0 sent,
+which 0.1.6 to 0.1.15 sent on every request. From 0.1.16 the plugin
+sends OpenCode 2.0.25's headers (`opencode/latest/2.0.25/cli`, its
+session id under `x-session-affinity` and `x-session-id` too): update
+the plugin.
 
 ## Install
 
