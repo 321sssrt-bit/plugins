@@ -18,7 +18,7 @@ afterAll(() => {
 })
 
 test("the CLI's account follows credentials.toml; a browser sign-in stays", async () => {
-  const cli = { type: "api", key: "saved", metadata: { cli: true, server: "https://s.example" } }
+  const cli = { type: "api", key: "saved", metadata: { cli: "true", server: "https://s.example" } }
   expect(await _internal.live(cli)).toEqual({ key: "saved", server: "https://s.example" })
   mkdirSync(join(data, "devin"))
   writeFileSync(join(data, "devin", "credentials.toml"), 'windsurf_api_key = "rotated"\napi_server_url = "https://t.example/"\n')
