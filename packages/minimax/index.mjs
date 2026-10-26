@@ -211,16 +211,17 @@ class OAuthError extends Error {
 
 // postForm posts an OAuth form, as MiniMax Code's client does; ok is false
 // when the answer is an HTTP error or carries an "error".
-async function postForm(url, fields) {
+async function postForm(url, fields, timeoutMs = 30000) {
   const res = await fetch(url, {
     method: "POST",
     headers: { Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams(fields).toString(),
-    signal: AbortSignal.timeout(30000),
+    signal: AbortSignal.timeout(timeoutMs),
   })
+  const text = await res.text() // preserve transport errors while reading the body
   let body
   try {
-    body = obj(JSON.parse(await res.text()))
+    body = obj(JSON.parse(text))
   } catch {}
   if (!body) throw new OAuthError("invalid_json_response", res.status)
   const error = str(body, "error")
@@ -283,30 +284,54 @@ async function startDevice(site) {
   }
 }
 
+// Only device-code polling is retried. Refresh tokens may be single-use.
+function transientDeviceError(e) {
+  const code = e?.code ?? e?.cause?.code
+  if (["ECONNRESET", "ETIMEDOUT", "EPIPE", "ECONNREFUSED", "EAI_AGAIN"].includes(code) || e?.name === "TimeoutError") return true
+  if (!(e instanceof OAuthError)) return false
+  const status = e.httpStatus
+  if (["invalid_grant", "access_denied", "expired_token", "invalid_client", "unauthorized_client"].includes(e.code)) return false
+  return status === 408 || status === 429 || status >= 500 && status <= 599 ||
+    e.code === "invalid_json_response" && status === 400
+}
+
 async function pollDevice(site, d) {
   let wait = d.intervalMs
+  let failures = 0
+  let delay = wait
   while (Date.now() < d.deadline) {
-    await sleep(wait)
-    const r = await postForm(site.account + "/oauth2/token", {
-      grant_type: DEVICE_GRANT,
-      ...d.poll,
-      client_id: CLIENT_ID,
-      code_verifier: d.verifier,
-    })
+    await sleep(Math.min(delay, Math.max(0, d.deadline - Date.now())))
+    if (Date.now() >= d.deadline) break
+    let r
+    try {
+      r = await postForm(site.account + "/oauth2/token", {
+        grant_type: DEVICE_GRANT,
+        ...d.poll,
+        client_id: CLIENT_ID,
+        code_verifier: d.verifier,
+      }, Math.max(1, Math.min(30000, d.deadline - Date.now())))
+      if (!r.ok && r.error !== "authorization_pending" && r.error !== "slow_down") {
+        throw new OAuthError(r.error ?? "device_authorization_failed", r.status)
+      }
+    } catch (e) {
+      if (!transientDeviceError(e) || ++failures > 3) throw e
+      delay = Math.max(wait, Math.min(30000, Math.max(wait, 1000) * 2 ** failures))
+      // Fixed text and numeric status only: never log forms, URLs or tokens.
+      console.warn(`MiniMax device authorization: temporary transport/response failure${e.httpStatus ? ` (HTTP ${e.httpStatus})` : ""}; retry ${failures}/3`)
+      continue
+    }
+    failures = 0
+    delay = wait
     const status = str(r.body, "status")
-    if (r.ok && status === "pending") continue
-    if (r.ok && status === "slow_down") {
+    if (r.ok && status === "pending" || r.error === "authorization_pending") continue
+    if (r.ok && status === "slow_down" || r.error === "slow_down") {
       wait += 5000
+      delay = wait
       continue
     }
     if (r.ok && (status === "denied" || status === "access_denied")) throw new OAuthError("access_denied", 0, "the sign-in was turned down")
     if (r.ok && (status === "expired" || status === "expired_token")) throw new OAuthError("expired_token", 0, "the sign-in code expired")
     if (r.ok) return token(r.body)
-    if (r.error === "authorization_pending") continue
-    if (r.error === "slow_down") {
-      wait += 5000
-      continue
-    }
     throw new OAuthError(r.error ?? "device_authorization_failed", r.status)
   }
   throw new OAuthError("expired_token", 0, "the sign-in code expired")
