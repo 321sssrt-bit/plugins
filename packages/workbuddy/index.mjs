@@ -705,6 +705,36 @@ function unflag(messages) {
 // OpenAI-compatible client normally uses max_completion_tokens and may call a
 // reasoning prompt developer; WorkBuddy's endpoint takes max_tokens and
 // system instead.
+// An earlier turn's thinking goes back as `reasoning`, the field WorkBuddy's
+// own client (CodeBuddy's agents converter) sets on an assistant message.
+// WorkBuddy drops `reasoning_content`, which Grok Build, DeepSeek-style
+// clients and magpie's own replies use: measured 2026-10-27 on
+// www.workbuddy.ai, a codeword in reasoning_content reached none of
+// kimi-k2.6, kimi-k3, glm-5.3, deepseek-v4.1-flash and minimax-m3, while
+// the same words as `reasoning` reached kimi-k2.6 and minimax-m3.
+// OpenRouter-style reasoning_details are read for their text the same way.
+function reasoningOf(m) {
+  if (typeof m.reasoning_content === "string" && m.reasoning_content) return m.reasoning_content
+  if (Array.isArray(m.reasoning_details)) {
+    const text = m.reasoning_details.map((d) => (typeof d?.text === "string" ? d.text : typeof d?.summary === "string" ? d.summary : "")).join("")
+    if (text) return text
+  }
+  return ""
+}
+
+function asReasoning(messages) {
+  let changed = false
+  for (const m of messages) {
+    if (m?.role !== "assistant" || (m.reasoning_content === undefined && m.reasoning_details === undefined)) continue
+    const text = reasoningOf(m)
+    if (text && !(typeof m.reasoning === "string" && m.reasoning)) m.reasoning = text
+    delete m.reasoning_content
+    delete m.reasoning_details
+    changed = true
+  }
+  return changed
+}
+
 function withSystem(body) {
   // a body magpie or OpenCode hands over as bytes is read as the text it is
   if (body instanceof ArrayBuffer || ArrayBuffer.isView(body)) body = new TextDecoder().decode(body)
@@ -723,6 +753,7 @@ function withSystem(body) {
       m.role = "system"
       changed = true
     }
+    if (asReasoning(b.messages)) changed = true
     if (b.messages[0]?.role !== "system") {
       b.messages.unshift({ role: "system", content: "You are a helpful assistant." })
       changed = true
@@ -2492,4 +2523,4 @@ export const WorkBuddyAuthPlugin = makePlugin(SITES.workbuddy)
 export const WorkBuddyAIAuthPlugin = makePlugin(SITES["workbuddy-ai"])
 
 // for tests
-export const _internal = { FREE_ONLY, PRICE_TTL, keyAccount, remoteConfig, cycleOf, typeUnions, systemAsUser, systemKey, DEFAULT_SYSTEM, EDGE_READS, fitShape, replyAfterTools, AFTER_TOOLS_REFUSED, enterpriseUsageOf, notDesktop, textOnly, runsOutOf, packagesOf, endOf, enterpriseHeaders, enterpriseOf, liveModels, browserSignIn, withSystem, normalizeToolChoice, fitTools, fitted, renamed, unflagged, usageOf, desktopHeld, explained, REFUSED_HINT, RESTRICTED_HINT, EXHAUSTED_HINT, freeCredits, creditsOf, priceOf, fresh, SITES, renewing, renewed, SESSION, attend, turnKey, conversationKey, signatureOf, isMessages, withoutUnsigned, withoutSignedThinking, answeredBefore, nativeOf, modelOf, configModels, API_MESSAGES: NPM_MESSAGES, API_CHAT: NPM }
+export const _internal = { FREE_ONLY, PRICE_TTL, keyAccount, remoteConfig, cycleOf, typeUnions, systemAsUser, systemKey, DEFAULT_SYSTEM, EDGE_READS, fitShape, replyAfterTools, AFTER_TOOLS_REFUSED, enterpriseUsageOf, notDesktop, textOnly, runsOutOf, packagesOf, endOf, enterpriseHeaders, enterpriseOf, liveModels, browserSignIn, withSystem, asReasoning, normalizeToolChoice, fitTools, fitted, renamed, unflagged, usageOf, desktopHeld, explained, REFUSED_HINT, RESTRICTED_HINT, EXHAUSTED_HINT, freeCredits, creditsOf, priceOf, fresh, SITES, renewing, renewed, SESSION, attend, turnKey, conversationKey, signatureOf, isMessages, withoutUnsigned, withoutSignedThinking, answeredBefore, nativeOf, modelOf, configModels, API_MESSAGES: NPM_MESSAGES, API_CHAT: NPM }

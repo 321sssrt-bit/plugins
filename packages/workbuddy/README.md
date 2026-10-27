@@ -164,8 +164,12 @@ refusal rests the account.
 
 The loader also translates OpenAI-compatible request spellings WorkBuddy
 doesn't take: `max_completion_tokens` becomes `max_tokens`, `developer`
-messages become `system`, and an object `tool_choice` becomes WorkBuddy's
-string form.
+messages become `system`, an object `tool_choice` becomes WorkBuddy's
+string form, and an earlier assistant turn's `reasoning_content` (or
+`reasoning_details` text) goes as `reasoning`, the field WorkBuddy's own
+client sends. WorkBuddy drops `reasoning_content`, so a client such as Grok
+Build that sends it lost its earlier thinking; nothing is folded into the
+message's content.
 
 A chat's tools are given shapes WorkBuddy's models take. Without them
 WorkBuddy AI answers 400 "Invalid request parameters" (11133), DeepSeek's
