@@ -714,6 +714,133 @@ test("a folded answer keeps reasoning, tool calls and usage apart", async () => 
   assert.deepEqual(json.usage, { prompt_tokens: 5, completion_tokens: 7, total_tokens: 12 })
 })
 
+// ---- tool names over CodeArts' 64 characters (#432) -------------------------
+
+// The reporter's tool, word for word: ZCode's android emulator MCP, 71 long.
+const ANDROID_TOOL = "mcp__plugin_android-emulator_android-emulator__android_discover_project"
+const toolOf = (name) => ({ type: "function", function: { name, description: "d", parameters: { type: "object", properties: {} } } })
+const sentOf = (init) => JSON.parse(new TextDecoder().decode(init.body))
+
+test("a tool name over 64 goes cut to 64: its first 55, _ and 8 hex of its SHA-256", async () => {
+  assert.equal(ANDROID_TOOL.length, 71)
+  const body = {
+    model: "GLM-5.2",
+    tools: [toolOf(ANDROID_TOOL), toolOf("read")],
+    tool_choice: { type: "function", function: { name: ANDROID_TOOL } },
+    messages: [
+      { role: "user", content: "find the project" },
+      { role: "assistant", content: "", tool_calls: [{ id: "c1", type: "function", function: { name: ANDROID_TOOL, arguments: "{}" } }] },
+      { role: "tool", tool_call_id: "c1", name: ANDROID_TOOL, content: "ok" },
+    ],
+  }
+  const { body: sent, names } = x.prepareChatBody(structuredClone(body))
+  const hex = (await x.sha256Hex(new TextEncoder().encode(ANDROID_TOOL))).slice(0, 8)
+  const cut = `${ANDROID_TOOL.slice(0, 55)}_${hex}`
+  assert.equal(cut.length, 64)
+  assert.equal(sent.tools[0].function.name, cut)
+  assert.equal(sent.tools[1].function.name, "read")
+  assert.equal(sent.tool_choice.function.name, cut)
+  assert.equal(sent.messages[1].tool_calls[0].function.name, cut)
+  assert.equal(sent.messages[2].name, cut)
+  assert.deepEqual([...names], [[cut, ANDROID_TOOL]])
+  // The same on the next request, so the history keeps matching its tool.
+  assert.equal(x.prepareChatBody(structuredClone(body)).body.tools[0].function.name, cut)
+  // Names that fit leave the body as it was, and nothing to put back.
+  const fits = { model: "GLM-5.2", tools: [toolOf("read"), toolOf("x".repeat(64))], messages: [] }
+  const plain = x.prepareChatBody(structuredClone(fits))
+  assert.equal(plain.names, null)
+  assert.deepEqual(plain.body.tools, fits.tools)
+})
+
+test("cut names never collide: alike for 55, or the cut of one being another tool's own name", () => {
+  const a = `${ANDROID_TOOL}_a_long_tail`
+  const b = `${ANDROID_TOOL}_b_long_tail`
+  const taken = x.cutToolName(a, 0) // a tool the agent itself calls by a's cut
+  const { body, names } = x.prepareChatBody({ model: "GLM-5.2", tools: [toolOf(a), toolOf(b), toolOf(taken)], messages: [] })
+  const sent = body.tools.map((t) => t.function.name)
+  assert.equal(new Set(sent).size, 3)
+  for (const n of sent) assert.ok(n.length <= x.TOOL_NAME_LIMIT, n)
+  // the agent's own short name goes as it is; a's is cut again, with a salt
+  assert.equal(sent[2], taken)
+  assert.notEqual(sent[0], taken)
+  assert.equal(sent[0].slice(0, 55), a.slice(0, 55))
+  assert.equal(names.get(sent[0]), a)
+  assert.equal(names.get(sent[1]), b)
+  assert.equal(names.has(taken), false)
+})
+
+test("a streamed tool call names the agent's tool again, whole or in pieces; other events pass byte for byte", async () => {
+  const cred = await makeCred()
+  const other = `${ANDROID_TOOL}_screenshot`
+  const cutA = x.cutToolName(ANDROID_TOOL, 0)
+  const cutB = x.cutToolName(other, 0)
+  const sentBodies = []
+  const head = sse({ id: "c3", model: "GLM-5.2", choices: [{ index: 0, delta: { role: "assistant", content: "" } }] })
+  const stream = head + sse(
+    // whole in one delta
+    { id: "c3", choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: "call_a", type: "function", function: { name: cutA, arguments: "" } }] } }] },
+    { id: "c3", choices: [{ index: 0, delta: { tool_calls: [{ index: 0, function: { arguments: '{"p":1}' } }] } }] },
+    // in three pieces, one across the 55th character
+    { id: "c3", choices: [{ index: 0, delta: { tool_calls: [{ index: 1, id: "call_b", type: "function", function: { name: cutB.slice(0, 30) } }] } }] },
+    { id: "c3", choices: [{ index: 0, delta: { tool_calls: [{ index: 1, function: { name: cutB.slice(30, 60) } }] } }] },
+    { id: "c3", choices: [{ index: 0, delta: { tool_calls: [{ index: 1, function: { name: cutB.slice(60), arguments: "{}" } }] } }] },
+    // a tool whose name fits
+    { id: "c3", choices: [{ index: 0, delta: { tool_calls: [{ index: 2, id: "call_c", type: "function", function: { name: "read", arguments: "{}" } }] } }] },
+    { id: "c3", choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }] },
+    "[DONE]",
+  )
+  const fetcher = async (url, init) => {
+    sentBodies.push(sentOf(init))
+    return sseResponse(stream)
+  }
+  const plugin = await CodeArtsAuthPlugin({ client: {} }, { fetch: fetcher })
+  const loaded = await plugin.auth.loader(async () => makeAuth(cred))
+  const res = await loaded.fetch(CHAT_URL, chatInit({
+    model: "GLM-5.2", stream: true, tools: [toolOf(ANDROID_TOOL), toolOf(other), toolOf("read")], messages: [{ role: "user", content: "hi" }],
+  }))
+  // CodeArts was sent names it takes
+  assert.deepEqual(sentBodies[0].tools.map((t) => t.function.name), [cutA, cutB, "read"])
+  for (const t of sentBodies[0].tools) assert.ok(t.function.name.length <= 64)
+  const text = await res.text()
+  // what the agent's stream folds to: its own names
+  const folded = x.completionFromChunks(x.parseSseEvents(text)).choices[0].message.tool_calls
+  assert.deepEqual(folded.map((c) => c.function.name), [ANDROID_TOOL, other, "read"])
+  assert.deepEqual(folded.map((c) => c.function.arguments), ['{"p":1}', "{}", "{}"])
+  // no cut name reaches the agent; events naming no cut tool are unchanged
+  assert.equal(text.includes(cutA) || text.includes(cutB), false)
+  assert.ok(text.startsWith(head))
+  assert.ok(text.endsWith('data: {"id":"c3","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}\n\ndata: [DONE]\n\n'))
+})
+
+test("a gateway that repeats a cut name in each delta still gives the agent's name", async () => {
+  const cut = x.cutToolName(ANDROID_TOOL, 0)
+  const names = new Map([[cut, ANDROID_TOOL]])
+  const text = sse(
+    { choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: "c", function: { name: cut, arguments: "" } }] } }] },
+    { choices: [{ index: 0, delta: { tool_calls: [{ index: 0, function: { name: cut, arguments: "{}" } }] } }] },
+    "[DONE]",
+  )
+  const out = await new Response(x.restoreToolNamesInStream(new Response(text).body, names)).text()
+  const evs = x.parseSseEvents(out)
+  assert.deepEqual(evs.map((e) => e.choices[0].delta.tool_calls[0].function.name), [ANDROID_TOOL, ANDROID_TOOL])
+})
+
+test("a folded tool call names the agent's tool again", async () => {
+  const cred = await makeCred()
+  const cut = x.cutToolName(ANDROID_TOOL, 0)
+  const stream = sse(
+    { id: "c4", model: "GLM-5.2", choices: [{ delta: { tool_calls: [{ index: 0, id: "call_1", type: "function", function: { name: cut, arguments: "{}" } }] } }] },
+    { id: "c4", choices: [{ delta: {}, finish_reason: "tool_calls" }] },
+    "[DONE]",
+  )
+  let sent
+  const plugin = await CodeArtsAuthPlugin({ client: {} }, { fetch: async (url, init) => { sent = sentOf(init); return sseResponse(stream) } })
+  const loaded = await plugin.auth.loader(async () => makeAuth(cred))
+  const json = await (await loaded.fetch(CHAT_URL, chatInit({ model: "GLM-5.2", tools: [toolOf(ANDROID_TOOL)], messages: [] }))).json()
+  assert.equal(sent.tools[0].function.name, cut)
+  assert.deepEqual(json.choices[0].message.tool_calls, [{ id: "call_1", type: "function", function: { name: ANDROID_TOOL, arguments: "{}" } }])
+})
+
 const capBody = JSON.stringify({ error_code: "TM.00001041", error_msg: "并发会话数已达上限(3个)，请关闭部分会话后重试。" })
 
 test("TM.00001041 as a 400 is retried, re-signed, until a session frees", async () => {

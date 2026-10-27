@@ -66,6 +66,10 @@ signing in, a short built-in catalog stands in.
 - Errors the gateway puts inside a `200` stream (spent quota, unknown model) come back as
   `429` / `400` / `502` with the vendor's words. The `codearts/` prefix is stripped and output
   budgets are clamped to 65536.
+- CodeArts takes tool names of up to 64 characters. A longer one (an MCP tool such as
+  `mcp__plugin_android-emulator_android-emulator__android_discover_project`) goes as its first
+  55 characters, `_` and 8 hex of its SHA-256, and the tool calls in the answer, streamed or
+  not, carry the agent's own name again.
 
 ## Usage and check-in
 
@@ -121,7 +125,8 @@ magpie 里使用其 GLM、DeepSeek、openPangu 等模型。provider id：`codear
   `opengw.developer.huaweicloud.com`），发往其他地址（如改过的 `api`）的请求在凭据发出前就被拒绝，签名请求和令牌请求都不跟随重定向；像客户端一样发送 `x-ot-session-id` 会话头（每账号一个会话），账号内
   在途请求不超过 3 个，`TM.00001041` 退避重试，网关排队时按客户端的方式等待；总是以流式请求上游（码道
   只对流式回答计量积分），调用方要非流式时折叠回 JSON；默认注入 `thinking: { type: "enabled" }`，思考与
-  正文分开；200 里内嵌的错误换算为 `429` / `400` / `502` 并带厂商原话。
+  正文分开；200 里内嵌的错误换算为 `429` / `400` / `502` 并带厂商原话；码道只接受不超过 64 个字符的工具名，
+  更长的（如 MCP 工具名）发出时缩为前 55 个字符 + `_` + 8 位 SHA-256，回答（流式与非流式）里的工具调用再换回原名。
 - **用量与签到**：总积分决定账号是否可用，其余积分桶只做明细；另有每日免费额度窗口。各批积分的到期
   时间读自码道控制台同一批接口，读不到时退回插件的签到账本 `~/.config/magpie/codearts-checkins.json`
   （这部分仍在用更多账号验证，请以控制台为准）。`auth.checkin` 与客户端「限时福利 → 每日领取」一致

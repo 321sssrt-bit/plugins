@@ -42,6 +42,7 @@
 // replaces its browser sign-in + bearer-token requests with CodeArts' OAuth +
 // signed-request flow. See README.md.
 
+import { createHash } from "node:crypto"
 import { createServer } from "node:http"
 import fs from "node:fs"
 import os from "node:os"
@@ -800,12 +801,15 @@ function isRegularModel(model, state) {
  * - the output budget inside the gateway's 65536;
  * - always `stream: true`. CodeArts meters only streamed answers — a
  *   non-streaming 200 returns tokens yet leaves the credits untouched — so a
- *   caller that asked for JSON gets the stream folded back (`fold`).
+ *   caller that asked for JSON gets the stream folded back (`fold`);
+ * - tool names within the gateway's 64 characters (`names`, short → the
+ *   agent's own, to put back in the answer; null when none was cut).
  * A body that is not a chat (no `model` + `messages`) gives null.
  */
 function prepareChatBody(parsed, { thinking = true } = {}) {
   if (!parsed || typeof parsed.model !== "string" || !Array.isArray(parsed.messages)) return null
   const body = { ...parsed, model: upstreamModelId(parsed.model) }
+  const names = shortenToolNames(body)
   // `injected`: ours to take back should a model refuse the parameter.
   const injected = thinking && body.thinking === undefined
   if (injected) body.thinking = ENABLE_THINKING
@@ -814,7 +818,208 @@ function prepareChatBody(parsed, { thinking = true } = {}) {
   }
   const fold = body.stream !== true
   body.stream = true
-  return { body, fold, injected }
+  return { body, fold, injected, names }
+}
+
+// ---- tool names over the gateway's limit (#432) -----------------------------
+
+/**
+ * CodeArts turns away a function name over 64 characters ("Function name
+ * […] length over limit, maximum is 64", InferHub.001001017.413), and an
+ * agent's MCP tools are often longer: ZCode's android emulator tool is
+ * `mcp__plugin_android-emulator_android-emulator__android_discover_project`,
+ * 71. A longer name goes as magpie's FlatName cuts one: its first 55
+ * characters, `_`, and 8 hex of its SHA-256, 64 in all. The same name is cut
+ * the same way on every request, so a call in the history keeps matching its
+ * tool, and two names that start alike differ in their hash.
+ */
+const TOOL_NAME_LIMIT = 64
+const TOOL_NAME_KEEP = 55
+
+function cutToolName(name, salt) {
+  let head = name.slice(0, TOOL_NAME_KEEP)
+  // never half a surrogate pair
+  if (/[\uD800-\uDBFF]$/.test(head)) head = head.slice(0, -1)
+  const hex = createHash("sha256").update(salt ? `${name}\u0000${salt}` : name).digest("hex")
+  return `${head}_${hex.slice(0, 8)}`
+}
+
+/** Every place a body names a tool: its tools, its history's calls, tool_choice. */
+function toolNameSlots(body) {
+  const slots = []
+  const slot = (obj, key) => {
+    if (obj && typeof obj === "object" && typeof obj[key] === "string") slots.push({ obj, key })
+  }
+  for (const t of Array.isArray(body.tools) ? body.tools : []) slot(t?.function, "name")
+  for (const f of Array.isArray(body.functions) ? body.functions : []) slot(f, "name")
+  const choice = body.tool_choice
+  if (choice && typeof choice === "object") slot(choice.function, "name")
+  if (body.function_call && typeof body.function_call === "object") slot(body.function_call, "name")
+  for (const m of Array.isArray(body.messages) ? body.messages : []) {
+    if (!m || typeof m !== "object") continue
+    for (const c of Array.isArray(m.tool_calls) ? m.tool_calls : []) slot(c?.function, "name")
+    slot(m.function_call, "name")
+    if (m.role === "tool" || m.role === "function") slot(m, "name")
+  }
+  return slots
+}
+
+/**
+ * Cut every tool name over the limit in body, in place; the map of each cut
+ * name to the agent's own, or null when every name fits. A cut name that is
+ * another tool's own name, or another cut one's, is cut again with a salt,
+ * so the map always leads back to one name.
+ */
+function shortenToolNames(body) {
+  const slots = toolNameSlots(body)
+  if (!slots.some((s) => s.obj[s.key].length > TOOL_NAME_LIMIT)) return null
+  const taken = new Set(slots.map((s) => s.obj[s.key]).filter((n) => n.length <= TOOL_NAME_LIMIT))
+  const short = new Map() // the agent's name → the one sent
+  const names = new Map() // the one sent → the agent's name
+  // In a fixed order, so the same names are cut alike on every request.
+  const long = [...new Set(slots.map((s) => s.obj[s.key]).filter((n) => n.length > TOOL_NAME_LIMIT))].sort()
+  for (const name of long) {
+    let cut = cutToolName(name, 0)
+    for (let salt = 1; taken.has(cut) || names.has(cut); salt += 1) cut = cutToolName(name, salt)
+    short.set(name, cut)
+    names.set(cut, name)
+  }
+  // In place: the body is signedFetch's own parse of the request.
+  for (const s of slots) {
+    const cut = short.get(s.obj[s.key])
+    if (cut) s.obj[s.key] = cut
+  }
+  return names
+}
+
+/** The agent's own names back in a whole completion's tool calls. */
+function restoreToolNames(completion, names) {
+  if (!names) return completion
+  for (const choice of Array.isArray(completion?.choices) ? completion.choices : []) {
+    const msg = choice?.message
+    if (!msg || typeof msg !== "object") continue
+    for (const c of Array.isArray(msg.tool_calls) ? msg.tool_calls : []) {
+      const name = c?.function?.name
+      if (typeof name === "string" && names.has(name)) c.function.name = names.get(name)
+    }
+    if (msg.function_call && names.has(msg.function_call.name)) msg.function_call.name = names.get(msg.function_call.name)
+  }
+  return completion
+}
+
+/**
+ * A stream with the agent's own names back in its tool calls. A call's name
+ * usually comes whole in one delta; should the gateway send it in pieces, the
+ * pieces of a cut name past its first 55 characters (the part that differs
+ * from the agent's) are held until the name is whole, then the rest of the
+ * agent's name goes in their place. Events that name no cut tool pass as
+ * they came, byte for byte.
+ */
+function restoreToolNamesInStream(stream, names) {
+  if (!names) return stream
+  const cuts = [...names.keys()]
+  const calls = new Map() // `${choice}:${call}` → { got, sent }
+  const enc = new TextEncoder()
+  const dec = new TextDecoder()
+  let pending = ""
+  const named = (key, piece) => {
+    const c = calls.get(key) ?? { got: "", sent: 0 }
+    calls.set(key, c)
+    // A whole cut name in one piece, the call's first or a gateway's repeat
+    // of it in a later delta: the agent's name, whole.
+    if (names.has(piece)) {
+      const own = names.get(piece)
+      c.got = own
+      c.sent = own.length
+      return own
+    }
+    c.got += piece
+    let out
+    if (names.has(c.got)) {
+      const own = names.get(c.got)
+      out = own.slice(c.sent)
+      c.sent = own.length
+      c.got = own // a whole name, matched once
+    } else if (c.got.length < TOOL_NAME_LIMIT && cuts.some((cut) => cut.startsWith(c.got))) {
+      const upTo = Math.min(c.got.length, TOOL_NAME_KEEP)
+      out = upTo > c.sent ? c.got.slice(c.sent, upTo) : ""
+      c.sent = Math.max(c.sent, upTo)
+    } else {
+      out = c.got.slice(c.sent)
+      c.sent = c.got.length
+    }
+    return out
+  }
+  // what was held back of a name that never became whole
+  const held = () => {
+    const choices = []
+    for (const [key, c] of calls) {
+      if (c.sent >= c.got.length) continue
+      const [ci, ti] = key.split(":").map(Number)
+      choices.push({ index: ci, delta: { tool_calls: [{ index: ti, function: { name: c.got.slice(c.sent) } }] } })
+      c.sent = c.got.length
+    }
+    return choices.length ? `data: ${JSON.stringify({ choices })}\n\n` : ""
+  }
+  const line = (l) => {
+    const t = l.replace(/\r$/, "")
+    if (!t.startsWith("data:")) return l
+    const payload = t.slice(5).trim()
+    if (payload === "[DONE]") return held() + l
+    if (!payload.includes("tool_calls") && !payload.includes("function_call")) return l
+    const ev = safeJson(payload)
+    if (!ev || !Array.isArray(ev.choices)) return l
+    let changed = false
+    for (const [ci, choice] of ev.choices.entries()) {
+      const delta = choice?.delta
+      if (!delta || typeof delta !== "object") continue
+      const index = Number.isInteger(choice.index) ? choice.index : ci
+      for (const [k, call] of (Array.isArray(delta.tool_calls) ? delta.tool_calls : []).entries()) {
+        const fn = call?.function
+        if (!fn || typeof fn.name !== "string") continue
+        const out = named(`${index}:${Number.isInteger(call.index) ? call.index : k}`, fn.name)
+        if (out !== fn.name) {
+          fn.name = out
+          changed = true
+        }
+      }
+      if (delta.function_call && typeof delta.function_call.name === "string") {
+        const out = named(`${index}:fc`, delta.function_call.name)
+        if (out !== delta.function_call.name) {
+          delta.function_call.name = out
+          changed = true
+        }
+      }
+    }
+    return changed ? `data: ${JSON.stringify(ev)}${l.endsWith("\r") ? "\r" : ""}` : l
+  }
+  const reader = stream.getReader()
+  return new ReadableStream({
+    async pull(controller) {
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) {
+          let rest = pending + dec.decode()
+          pending = ""
+          if (rest) rest = line(rest)
+          rest += held()
+          if (rest) controller.enqueue(enc.encode(rest))
+          controller.close()
+          return
+        }
+        pending += dec.decode(value, { stream: true })
+        const cut = pending.lastIndexOf("\n")
+        if (cut < 0) continue
+        const whole = pending.slice(0, cut)
+        pending = pending.slice(cut + 1)
+        controller.enqueue(enc.encode(whole.split("\n").map(line).join("\n") + "\n"))
+        return
+      }
+    },
+    cancel(reason) {
+      return reader.cancel(reason)
+    },
+  })
 }
 
 // ---- reading the gateway's answers -----------------------------------------
@@ -1005,7 +1210,7 @@ function completionFromChunks(events) {
 }
 
 /** Answer a caller that asked for JSON: read the whole stream, fold it. */
-async function foldAnswer(res, head) {
+async function foldAnswer(res, head, names = null) {
   let text = head.text
   if (head.reader) {
     for (;;) {
@@ -1019,10 +1224,14 @@ async function foldAnswer(res, head) {
   headers.set("content-type", "application/json")
   const events = parseSseEvents(text)
   if (events.some((ev) => Array.isArray(ev.choices) && ev.choices.length > 0)) {
-    return new Response(JSON.stringify(completionFromChunks(events)), { status: res.status, statusText: res.statusText, headers })
+    return new Response(JSON.stringify(restoreToolNames(completionFromChunks(events), names)), { status: res.status, statusText: res.statusText, headers })
   }
   // The gateway answered JSON after all, or nothing at all.
-  if (Array.isArray(safeJson(text)?.choices)) return new Response(text, { status: res.status, statusText: res.statusText, headers })
+  const whole = safeJson(text)
+  if (Array.isArray(whole?.choices)) {
+    const body = names ? JSON.stringify(restoreToolNames(whole, names)) : text
+    return new Response(body, { status: res.status, statusText: res.statusText, headers })
+  }
   return errorResponse(502, errorCodeOf(text), firstOf(errorMessageOf(text), "the gateway returned an empty answer"))
 }
 
@@ -1352,9 +1561,10 @@ async function signedFetch(cred, input, init, context) {
       if (res.ok) {
         const head = await peekAnswer(res)
         if (!head.code) {
-          if (chat.fold) return await foldAnswer(res, head)
+          if (chat.fold) return await foldAnswer(res, head, chat.names)
           handedOver = true
-          return new Response(replayBody(head, release), { status: res.status, statusText: res.statusText, headers: streamHeaders(res.headers) })
+          const stream = restoreToolNamesInStream(replayBody(head, release), chat.names)
+          return new Response(stream, { status: res.status, statusText: res.statusText, headers: streamHeaders(res.headers) })
         }
         text = head.text
         code = head.code
@@ -2423,6 +2633,7 @@ export const _internal = {
   readGrants, recordGrant, readUnconfirmed, recordUnconfirmed, grantExpiry, grantBatches, soonestLapse, fetchCreditBatches,
   PACKAGE_CREDIT_PAGE_URL, OPS_CREDIT_OVERVIEW_URL, OPS_CREDIT_CAMPAIGN_URL,
   toBytes, isBenefitModel, prepareChatBody, signedFetch, signedGet,
+  TOOL_NAME_LIMIT, cutToolName, shortenToolNames, restoreToolNames, restoreToolNamesInStream,
   parseSseEvents, errorCodeOf, errorMessageOf, isStaleCredential, isRateLimitCode, embeddedErrorStatus, classifyHead,
   peekAnswer, completionFromChunks, createConcurrencyGate, delay, retryDelayMs,
   isRegularModel, queueInfoOf, waitInQueue, TRACE_QUEUE_URL, SESSION_HEADER,
