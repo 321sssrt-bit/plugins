@@ -228,6 +228,22 @@ some hours of the day (Hy4 preview, free 23:00–8:00) is given as its full
 price, never as free: magpie keeps the list until it asks again, so a list
 asked for at night would say "free" all day (#121).
 
+### Free models only
+
+Each site (WorkBuddy, WorkBuddy AI) has a "Free models only" switch in its
+provider settings in magpie, off by default (#430). When it is on:
+
+- the list holds only the models the site serves at no cost now. A model free
+  only at night, or one with no price, counts as paid;
+- a request for any other model is answered by the plugin with a 404
+  `model_not_found` and never sent, so no credits are spent. magpie rests
+  only that model and tries the next provider;
+- if the price list can't be read, nothing is sent (503), since whether the
+  model is free is unknown. An API key WorkBuddy lists no prices for lists
+  no models.
+
+The price list is read again at most once a minute for requests.
+
 ## Credits in magpie
 
 magpie's usage card shows the account's credits from the resource summary.

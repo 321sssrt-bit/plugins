@@ -592,6 +592,12 @@ function withoutSignedThinking(body) {
 
 // chatOf is a chat's body as the object it is, null for one that isn't: a
 // body that isn't text (bytes), or isn't JSON at all.
+// bodyString is a body given as bytes, as text; anything else is null.
+function bodyString(body) {
+  if (body instanceof ArrayBuffer || ArrayBuffer.isView(body)) return new TextDecoder().decode(body)
+  return null
+}
+
 function chatOf(body) {
   if (typeof body !== "string") return null
   try {
@@ -2027,6 +2033,29 @@ function replyAfterTools(body) {
   return JSON.stringify(b)
 }
 
+// FREE_ONLY is the switch that keeps an account off credits (#430): its
+// list holds only the models WorkBuddy serves at no cost (priceOf's free),
+// and a request for any other is answered here, never sent. A price that
+// can't be read is not free, and a list that can't be read sends nothing.
+const FREE_ONLY = "free_only"
+// PRICE_TTL is how long a list read for that check is used before it is
+// read again: a promotion that ends stops counting as free within it.
+const PRICE_TTL = 60_000
+
+// notFree is the answer to a request the switch keeps from WorkBuddy. Its
+// words say the model, not the account, is what is turned away, so magpie
+// rests that model alone and asks another provider of it; they name no
+// quota or credit, which would rest the whole account as out of credit.
+function notFree(site, model, why) {
+  const msg = why
+    ? `${site.name}'s model list couldn't be read (${why}), so whether model ${model || "(none)"} is free is unknown; with "Free models only" on it isn't sent`
+    : `model ${model || "(none)"} is not available while "Free models only" is on: ${site.name} charges for it. Turn the switch off in ${site.name}'s provider settings to use it`
+  return new Response(JSON.stringify({ error: { message: msg, type: "invalid_request_error", code: why ? "free_only_unknown" : "model_not_found" } }), {
+    status: why ? 503 : 404,
+    headers: { "content-type": "application/json", "X-Magpie-Sign-In": "kept" },
+  })
+}
+
 function makePlugin(site) {
   // the models of this site that refused tool results then the user's
   // message, for this run: their next chats go with replyAfterTools at once
@@ -2034,7 +2063,30 @@ function makePlugin(site) {
   // the system prompts this run WorkBuddy refused as an unapproved channel:
   // their next chats go with systemAsUser at once, not refused first
   const refusedSystems = new Set()
-  return async ({ client }) => ({
+  return async ({ client, magpie }) => {
+  // each account's list as last read, for FREE_ONLY: {at, list}
+  const lists = new Map()
+  const listKey = (a) => `${a.uid ?? ""}|${a.enterpriseId ?? ""}|${a.source === "key" ? a.key : ""}`
+  // listed is the account's live list, read again past PRICE_TTL
+  const listed = async (a, fresh = false) => {
+    const k = listKey(a)
+    const was = lists.get(k)
+    if (!fresh && was && Date.now() - was.at < PRICE_TTL) return was.list
+    const list = await liveModels(site, a)
+    lists.set(k, { at: Date.now(), list })
+    if (lists.size > 64) lists.delete(lists.keys().next().value)
+    return list
+  }
+  const freeOnly = () => magpie?.option?.(site.id, FREE_ONLY) === true
+  // onlyFree is a list with the switch on: its free models, or a failure
+  // when there are none to tell (magpie then keeps the list it had)
+  const onlyFree = (ms) => {
+    if (!freeOnly()) return ms
+    const free = ms.filter((m) => m.free)
+    if (!free.length) throw new Error(`${site.name} lists no free model, and "Free models only" is on`)
+    return free
+  }
+  return {
     config: async (config) => {
       config.provider ??= {}
       config.provider[site.id] ??= {}
@@ -2059,23 +2111,34 @@ function makePlugin(site) {
         if (auth?.type === "api") {
           // asked as WorkBuddy's own CLI asks with a key (remoteConfig)
           const a = keyAccount(auth)
-          if (!a || !remoteConfig(a.key)) return provider.models
-          try {
-            const ms = await liveModels(site, a)
-            return ms.length ? Object.fromEntries(ms.map((m) => [m.id, modelOf(site, provider, m)])) : provider.models
-          } catch {
+          if (!a || !remoteConfig(a.key)) {
+            if (freeOnly()) throw new Error(`${site.name} lists no prices for this key, and "Free models only" is on`)
             return provider.models
           }
+          let ms
+          try {
+            ms = await listed(a, true)
+          } catch (e) {
+            if (freeOnly()) throw e
+            return provider.models
+          }
+          if (!ms.length && !freeOnly()) return provider.models
+          return Object.fromEntries(onlyFree(ms).map((m) => [m.id, modelOf(site, provider, m)]))
         }
         if (auth?.type !== "oauth" || !(auth.access || auth.source)) return provider.models
+        let ms
         try {
           const a = await current(site, client, auth)
-          const ms = await liveModels(site, a)
-          if (!ms.length) return provider.models
-          return Object.fromEntries(ms.map((m) => [m.id, modelOf(site, provider, m)]))
-        } catch {
+          ms = await listed(a, true)
+        } catch (e) {
+          // with the switch on, a list without prices would offer models
+          // that cost credits: the failure goes up, and magpie keeps the
+          // list it had
+          if (freeOnly()) throw e
           return provider.models
         }
+        if (!ms.length && !freeOnly()) return provider.models
+        return Object.fromEntries(onlyFree(ms).map((m) => [m.id, modelOf(site, provider, m)]))
       },
     },
     auth: {
@@ -2087,6 +2150,13 @@ function makePlugin(site) {
       // and is renewed as before.
       refreshLead: LEAD_MS,
       refresh: (auth) => refreshed(site, auth),
+      options: [
+        {
+          key: FREE_ONLY,
+          label: "Free models only",
+          description: `Lists only the models ${site.name} serves at no cost, and turns away a request for any other here instead of sending it, so no credits are spent. A model free only at night counts as paid.`,
+        },
+      ],
       async loader(getAuth) {
         const auth = await getAuth()
         if (auth?.type !== "oauth" && auth?.type !== "api") return {}
@@ -2110,6 +2180,18 @@ function makePlugin(site) {
             sign(site, a, headers)
             let body = init?.body
             if (body === undefined && req) body = await req.clone().text()
+            // the switch is checked before anything is sent: a model not
+            // free, or one whose price can't be read, never reaches WorkBuddy
+            if (freeOnly()) {
+              const model = chatOf(typeof body === "string" ? body : bodyString(body))?.model
+              let list
+              try {
+                list = await listed(a)
+              } catch (e) {
+                return notFree(site, model, e?.message ?? String(e))
+              }
+              if (!list.some((m) => m.id === model && m.free)) return notFree(site, model)
+            }
             // An Anthropic request goes as the agent sent it: WorkBuddy
             // serves these models on Messages itself, and the rewrites
             // below (a default system message, the chat endpoint's
@@ -2304,7 +2386,8 @@ function makePlugin(site) {
         },
       ],
     },
-  })
+  }
+  }
 }
 
 // REFUSED_HINT is what the user can do about WorkBuddy's "Illegal API
@@ -2409,4 +2492,4 @@ export const WorkBuddyAuthPlugin = makePlugin(SITES.workbuddy)
 export const WorkBuddyAIAuthPlugin = makePlugin(SITES["workbuddy-ai"])
 
 // for tests
-export const _internal = { keyAccount, remoteConfig, cycleOf, typeUnions, systemAsUser, systemKey, DEFAULT_SYSTEM, EDGE_READS, fitShape, replyAfterTools, AFTER_TOOLS_REFUSED, enterpriseUsageOf, notDesktop, textOnly, runsOutOf, packagesOf, endOf, enterpriseHeaders, enterpriseOf, liveModels, browserSignIn, withSystem, normalizeToolChoice, fitTools, fitted, renamed, unflagged, usageOf, desktopHeld, explained, REFUSED_HINT, RESTRICTED_HINT, EXHAUSTED_HINT, freeCredits, creditsOf, priceOf, fresh, SITES, renewing, renewed, SESSION, attend, turnKey, conversationKey, signatureOf, isMessages, withoutUnsigned, withoutSignedThinking, answeredBefore, nativeOf, modelOf, configModels, API_MESSAGES: NPM_MESSAGES, API_CHAT: NPM }
+export const _internal = { FREE_ONLY, PRICE_TTL, keyAccount, remoteConfig, cycleOf, typeUnions, systemAsUser, systemKey, DEFAULT_SYSTEM, EDGE_READS, fitShape, replyAfterTools, AFTER_TOOLS_REFUSED, enterpriseUsageOf, notDesktop, textOnly, runsOutOf, packagesOf, endOf, enterpriseHeaders, enterpriseOf, liveModels, browserSignIn, withSystem, normalizeToolChoice, fitTools, fitted, renamed, unflagged, usageOf, desktopHeld, explained, REFUSED_HINT, RESTRICTED_HINT, EXHAUSTED_HINT, freeCredits, creditsOf, priceOf, fresh, SITES, renewing, renewed, SESSION, attend, turnKey, conversationKey, signatureOf, isMessages, withoutUnsigned, withoutSignedThinking, answeredBefore, nativeOf, modelOf, configModels, API_MESSAGES: NPM_MESSAGES, API_CHAT: NPM }
