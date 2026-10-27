@@ -51,7 +51,7 @@ export const PICKER = [
 export function fakeAPI(picker = PICKER, usableIDs) {
   globalThis.fetch = async (url) => {
     const u = String(url)
-    if (u.endsWith("/agent.v1.AgentService/GetUsableModels")) return usableIDs ? Response.json({ models: usableIDs.map((modelId) => ({ modelId })) }) : new Response("down", { status: 503 })
+    if (u.endsWith("/agent.v1.AgentService/GetUsableModels")) return usableIDs ? Response.json({ models: usableIDs.map((m) => (typeof m === "string" ? { modelId: m } : m)) }) : new Response("down", { status: 503 })
     if (u.endsWith("/aiserver.v1.AiService/AvailableModels")) return picker ? Response.json({ models: picker }) : new Response("down", { status: 503 })
     throw new Error("the test asked " + u)
   }
@@ -283,4 +283,98 @@ test("when the default's own branch stops short, an id of it asked past that goe
         const [sent, , params] = q(id, effort, fast)
         expect([id, effort, fast, params]).toEqual([id, effort, fast, { ...params, ...slug.get(sent) }])
       }
+})
+
+// ysm119 on Discord (magpie #3150): a Cursor Team account whose
+// cursor-agent models (GetUsableModels) lists Claude Opus 5.5 at each effort,
+// as below word for word, while the picker the plugin listed from had
+// nothing of it. cursor/claude-opus-5-5@1m went to Cursor as it was
+// ("AI Model Not Found"), so did claude-opus-5-5, and only the usable ids
+// themselves ran.
+const OPUS55_USABLE = ["low", "medium", "high", "xhigh", "max"].flatMap((e) => {
+  const word = { low: "Low", medium: "", high: "High", xhigh: "Extra High", max: "Max" }[e]
+  const name = ("Claude Opus 5.5 1M " + word).trim()
+  return [
+    { modelId: "claude-opus-5-5-" + e, displayModelId: "claude-opus-5-5-" + e, displayName: name, displayNameShort: name, maxMode: false },
+    { modelId: "claude-opus-5-5-" + e + "-fast", displayModelId: "claude-opus-5-5-" + e + "-fast", displayName: name + " Fast", displayNameShort: name + " Fast", maxMode: true },
+  ]
+})
+const REST_USABLE = ["grok-4.7-high-fast", "grok-4.7-low-fast", "grok-4.7-high", "grok-4.7-low", "cursor-grok-4.6-high", "cursor-grok-4.6-low", "composer-2.5", "composer-2.5-fast", { modelId: "default", displayModelId: "auto", displayName: "Auto" }]
+const usableIDs = new Set([...OPUS55_USABLE.map((m) => m.modelId), ...REST_USABLE.map((m) => m.modelId ?? m), "auto"])
+
+test("a family cursor-agent lists and the picker hasn't is offered once, with its efforts, and runs as its own ids", async () => {
+  fakeAPI(PICKER.filter((m) => m.name !== "claude-opus-5-5"), [...OPUS55_USABLE, ...REST_USABLE])
+  const raw = await usable(tok())
+  const opus = raw.find((m) => m.id === "claude-opus-5-5")
+  expect([opus.name, opus.context, Object.keys(opus.levels), opus.offersFast]).toEqual(["Claude Opus 5.5", 200000, ["low", "medium", "high", "xhigh", "max"], true])
+  // nothing else is added: the other ids are the picker's
+  expect(raw.filter((m) => m.usableOnly).map((m) => m.id)).toEqual(["claude-opus-5-5"])
+  expect(raw.some((m) => /^claude-opus-5-5-/.test(m.id))).toBe(false)
+  const q = (id, effort = "", fast) => {
+    const r = request(raw, id, effort, fast)
+    return [r.id, r.maxMode, r.params]
+  }
+  // the folded name: Cursor's default effort, medium, or the one asked
+  expect(q("claude-opus-5-5")).toEqual(["claude-opus-5-5-medium", false, []])
+  expect(q("claude-opus-5-5", "low")).toEqual(["claude-opus-5-5-low", false, []])
+  expect(q("claude-opus-5-5", "minimal")).toEqual(["claude-opus-5-5-low", false, []])
+  expect(q("claude-opus-5-5", "high", true)).toEqual(["claude-opus-5-5-high-fast", true, []])
+  // the stale sized name from an earlier list: in Max Mode for 1M, as the
+  // picker runs Opus 5.5 at 1m
+  expect(q("claude-opus-5-5@1m")).toEqual(["claude-opus-5-5-medium", true, []])
+  expect(q("claude-opus-5-5@1m", "low")).toEqual(["claude-opus-5-5-low", true, []])
+  expect(q("claude-opus-5-5@300k", "xhigh")).toEqual(["claude-opus-5-5-xhigh", true, []])
+  // the usable ids themselves, the reporter's workaround, as they are
+  expect(q("claude-opus-5-5-low")).toEqual(["claude-opus-5-5-low", false, []])
+  expect(q("claude-opus-5-5-medium")).toEqual(["claude-opus-5-5-medium", false, []])
+  expect(q("claude-opus-5-5-max-fast")).toEqual(["claude-opus-5-5-max-fast", true, []])
+  // the request's effort still counts, as for a picker model's variant id
+  expect(q("claude-opus-5-5-low", "high")[0]).toBe("claude-opus-5-5-high")
+  // a -fast family 0.1.x listed
+  expect(q("claude-opus-5-5-fast")[0]).toBe("claude-opus-5-5-medium-fast")
+  // whatever is asked, an Opus 5.5 id goes out as one Cursor listed
+  for (const id of ["claude-opus-5-5", "claude-opus-5-5@1m", "claude-opus-5-5@300k", "claude-opus-5-5-fast", ...OPUS55_USABLE.map((m) => m.modelId)])
+    for (const effort of ["", "off", "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"])
+      for (const fast of [undefined, false, true]) expect([id, effort, fast, usableIDs.has(request(raw, id, effort, fast).id)]).toEqual([id, effort, fast, true])
+})
+
+test("a picker model without variants goes as the usable id of its family, not its bare name", async () => {
+  // the picker names Opus 5.5 without its variants or their ids: the
+  // request went as claude-opus-5-5, which Cursor doesn't serve
+  const bare = { name: "claude-opus-5-5", clientDisplayName: "Claude Opus 5.5", contextTokenLimit: 300000, supportsNonMaxMode: true }
+  fakeAPI([bare, ...PICKER.filter((m) => m.name !== "claude-opus-5-5")], [...OPUS55_USABLE, ...REST_USABLE])
+  const raw = await usable(tok())
+  expect(raw.filter((m) => m.run === "claude-opus-5-5").map((m) => [m.id, m.context])).toEqual([["claude-opus-5-5", 300000]])
+  const q = (id, effort = "", fast) => {
+    const r = request(raw, id, effort, fast)
+    return [r.id, r.maxMode]
+  }
+  expect(q("claude-opus-5-5")).toEqual(["claude-opus-5-5-medium", false])
+  expect(q("claude-opus-5-5", "low")).toEqual(["claude-opus-5-5-low", false])
+  expect(q("claude-opus-5-5", "max", true)).toEqual(["claude-opus-5-5-max-fast", true])
+  expect(q("claude-opus-5-5@1m")).toEqual(["claude-opus-5-5-medium", true])
+  expect(q("claude-opus-5-5-low")).toEqual(["claude-opus-5-5-low", false])
+})
+
+test("an id at a size the list no longer has runs at the nearest size the model has", async () => {
+  fakeAPI()
+  const raw = await usable(tok())
+  const q = (id, effort = "") => {
+    const r = request(raw, id, effort, undefined)
+    return [r.id, r.maxMode, Object.fromEntries(r.params.map((x) => [x.id, x.value])).context]
+  }
+  expect(q("claude-opus-5-5@2m")).toEqual(["claude-opus-5-5-medium", true, "1m"])
+  expect(q("claude-opus-5-5@200k", "high")).toEqual(["claude-opus-5-5-high", false, "300k"])
+  expect(q("grok-4.7@1m")[2]).toBe("500k")
+  // a model now listed without sizes: itself, in Max Mode past its window
+  expect(q("grok-4.6@256k")).toEqual(["cursor-grok-4.6-high", false, undefined])
+  expect(q("grok-4.6@1m")[1]).toBe(true)
+  // nothing of it anywhere: as it is named
+  expect(q("nothing@1m")).toEqual(["nothing@1m", false, undefined])
+})
+
+test("a picker that covers every usable id is listed as before", async () => {
+  fakeAPI(PICKER, [...OPUS55_USABLE.filter((m) => /-(medium|high)(-fast)?$/.test(m.modelId)), ...REST_USABLE])
+  const raw = await usable(tok())
+  expect(raw.some((m) => m.usableOnly)).toBe(false)
 })
