@@ -1131,8 +1131,9 @@ const errorResponse = ({ status, message, signIn = status === 401 ? "kept" : und
 // the request's requestSetId, the model and the plan's queueType, at once
 // and then every retryAfterSeconds (held to 0.5s..30s, 30s when unsaid),
 // while the state says isQueued or serviceAvailable false. Once isQueued is
-// false it waits that state's retryAfterSeconds, if any, and sends the same
-// request again, request_set_id and all, up to 10 times. Three failed asks
+// false it waits that state's retryAfterSeconds, if any, and sends the
+// request again in the same request_set_id under a new request_id and
+// chat_record_id, up to 10 times; the refused call's stream is closed. Three failed asks
 // in a row, a 404 (no queue there) or a state with neither field end the
 // wait. Qoder's client waits up to an hour; here the whole of it is held
 // under QUEUE.budget from the request's start, since nothing reaches the
@@ -2561,12 +2562,20 @@ const makePlugin = (site) => async ({ client }) => {
     const CHAT_URL = api + CHAT_PATH
     const task = taskOf(sessionOf(chat, named), chat)
     const body = qoderBody(chat, m, named, task, siteOf(site, cred))
-    const wire = encodeBody(JSON.stringify(body))
-    // Qoder's queue is waited out (queueWait) and the same request, its
-    // request_set_id the one the queue knows, sent again
+    // Qoder's queue is waited out (queueWait) and the request sent again
+    // under the request_set_id the queue knows, with a new request_id and
+    // chat_record_id, as Qoder's client sends it (its o4i before each
+    // resend). On a real qoder.com account (plugins#427) the free models
+    // are queued in p3 for RESOURCE_LIMIT, about 30s at a time, and a
+    // resend can be queued again before it is answered.
     const deadline = QUEUE.now() + QUEUE.budget
     const ask = { requestSetId: body.request_set_id, requestId: body.request_id, sessionId: body.session_id, modelKey: m.key }
     for (let waited = 0; ; waited++) {
+      if (waited) {
+        body.request_id = body.chat_record_id = randomUUID()
+        ask.requestId = body.request_id
+      }
+      const wire = encodeBody(JSON.stringify(body))
       const headers = {
         ...cosyHeaders(CHAT_URL, cred, wire, siteOf(site, cred)),
         Accept: "text/event-stream",
@@ -2574,17 +2583,23 @@ const makePlugin = (site) => async ({ client }) => {
         "X-Model-Key": m.key,
         "X-Model-Source": m.source,
       }
+      // a refused call's stream is closed: Qoder keeps a 10605 stream open
+      // after its one event, and a connection held open while the call is
+      // waited out and sent again is one more the account holds
+      const call = new AbortController()
+      const signal = init.signal ? AbortSignal.any([init.signal, call.signal]) : call.signal
       let res, open
       try {
-        res = await fetch(CHAT_URL, { method: "POST", headers, body: wire, signal: init.signal })
+        res = await fetch(CHAT_URL, { method: "POST", headers, body: wire, signal })
         if (res.ok) open = await opened(res, chat.tool_choice !== "none" ? (chat.tools ?? []).filter((t) => t?.type === "function") : [])
       } catch (e) {
         return errorResponse({ status: 502, message: e.message })
       }
       const f = !res.ok ? failure(res.status, (await res.text()).slice(0, 1 << 20)) : open.first.value?.error
+      if (f) call.abort()
       // an answered call moves its task on, as Qoder's client moves it
       if (!f) task.answered = true
-      if (!f?.queue || waited >= QUEUE.recoveries) return f && !res.ok ? errorResponse(f) : answer(open, chat, servedName)
+      if (!f?.queue || waited >= QUEUE.recoveries) return f ? errorResponse(f) : answer(open, chat, servedName)
       try {
         if (!(await queueWait(api, cred, ask, f.queue, init.signal, deadline, siteOf(site, cred)))) return errorResponse(f)
       } catch (e) {
