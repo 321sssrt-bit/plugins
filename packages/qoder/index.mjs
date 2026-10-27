@@ -38,8 +38,9 @@ import { createCipheriv, createHash, publicEncrypt, randomBytes, randomUUID, con
 import { execFile } from "node:child_process"
 import { readdir, stat } from "node:fs/promises"
 import { STATUS_CODES } from "node:http"
-import { homedir } from "node:os"
+import { homedir, hostname } from "node:os"
 import { join, resolve } from "node:path"
+import { domainToASCII } from "node:url"
 
 const CHAT_PATH = "/algo/api/v2/service/pro/sse/agent_chat_generation?FetchKeys=llm_model_result&AgentId=agent_common&Encode=1"
 const MODELS_PATH = "/algo/api/v2/model/list?Encode=1"
@@ -73,10 +74,33 @@ const hexID = () => randomUUID().replaceAll("-", "")
 
 // ---- the COSY envelope --------------------------------------------------------
 
-// machineOS names the machine as Qoder's desktop clients do.
-function machineOS() {
-  const arch = { x64: "x86_64", ia32: "x86", arm64: "aarch64" }[process.arch] ?? process.arch
-  return arch + "_" + process.platform
+// machineOS names the machine as Qoder's desktop client does: Node's
+// process.platform, so x86_64_win32 on Windows, aarch64_darwin on a Mac
+// (its worker runtime's COSY_MACHINE_OS, Qoder 0.4.3). Only x64 and arm64
+// are renamed; any other arch goes as Node names it.
+function machineOS(arch = process.arch, platform = process.platform) {
+  return ({ x64: "x86_64", arm64: "aarch64" }[arch] ?? arch) + "_" + platform
+}
+
+// machineHostname is the Cosy-MachineHostname Qoder's client puts on a chat
+// request: os.hostname(), sent as it is when it is printable ASCII, else
+// its punycode, else made safe and marked with a hash of the original, at
+// most 96 characters (its zei). "" (none is sent) for an empty name.
+const HOST_SAFE = /^[\x21-\x7e](?:[\x20-\x7e]*[\x21-\x7e])?$/u
+function machineHostname(name = hostname()) {
+  const hash = (v) => createHash("sha256").update(v, "utf8").digest("hex").slice(0, 8)
+  const cap = (v) => {
+    if (v.length <= 96) return v
+    const head = v.slice(0, 96 - 8 - 1).replace(/[-\s]+$/u, "")
+    return head ? `${head}-${hash(v)}` : `unknown-${hash(v)}`
+  }
+  const v = String(name ?? "").trim()
+  if (!v) return ""
+  if (HOST_SAFE.test(v)) return cap(v)
+  const ascii = domainToASCII(v)
+  if (ascii && HOST_SAFE.test(ascii)) return cap(ascii)
+  const safe = v.replace(/[^\x21-\x7e]+/gu, "-").replace(/-{2,}/gu, "-").replace(/^-+|-+$/gu, "")
+  return cap(safe ? `${safe}-${hash(v)}` : `unknown-${hash(v)}`)
 }
 
 // userBlob is the account as the envelope carries it: AES-128-CBC under a
@@ -98,7 +122,9 @@ function cosyHeaders(url, u, body, site, ts = Math.floor(Date.now() / 1000)) {
   const cosyVersion = site?.cosyVersion ?? COSY_VERSION
   const blob = userBlob(u, site?.rsaKey)
   const payload = Buffer.from(
-    JSON.stringify({ version: "v1", requestId: hexID(), info: blob.info, cosyVersion, ideVersion: "" }),
+    // the request id is a dashed UUID, as Qoder's signer makes it; its
+    // ideVersion is "" too
+    JSON.stringify({ version: "v1", requestId: randomUUID(), info: blob.info, cosyVersion, ideVersion: "" }),
   ).toString("base64")
   let path = new URL(url).pathname
   if (path.startsWith("/algo")) path = path.slice(5)
@@ -125,6 +151,25 @@ function cosyHeaders(url, u, body, site, ts = Math.floor(Date.now() / 1000)) {
     "Cosy-Version": cosyVersion,
     "Login-Version": "v2",
   }
+}
+
+// chatHeaders are the headers of a chat (agent_chat_generation) call, as
+// Qoder's client builds them (its prepareInferRequest, then Vai): no
+// Cosy-ClientIp; Cosy-MachineToken and Cosy-MachineType are its device
+// identity's (the runtime-info the check-in reads), or left off when it has
+// none, rather than the machine id cosyHeaders puts there; and the
+// machine's hostname. Every other call keeps cosyHeaders' set, which is
+// its prepareRequest's: there ClientIp, MachineId and MachineToken are all
+// the machine id (#443).
+function chatHeaders(url, u, body, site, model, identity = {}) {
+  const h = cosyHeaders(url, u, body, site)
+  delete h["Cosy-ClientIp"]
+  delete h["Cosy-MachineToken"]
+  delete h["Cosy-MachineType"]
+  for (const key of ["Cosy-MachineToken", "Cosy-MachineType"]) if (identity[key]) h[key] = identity[key]
+  const host = machineHostname()
+  if (host) h["Cosy-MachineHostname"] = host
+  return { ...h, Accept: "text/event-stream", "Cache-Control": "no-cache", "X-Model-Key": model.key, "X-Model-Source": model.source }
 }
 
 // ---- the body codec -----------------------------------------------------------
@@ -2235,11 +2280,29 @@ const makePlugin = (site) => async ({ client }) => {
       campaignMachines.set(uid, entry)
     }
     try {
-      return await entry.promise
+      const got = await entry.promise
+      if (campaignMachines.get(uid) === entry) readIdentities.set(uid, { at: entry.at, headers: got })
+      return got
     } catch (e) {
       if (campaignMachines.get(uid) === entry) campaignMachines.delete(uid)
       throw e
     }
+  }
+  // chatIdentity: the device identity a chat carries, as Qoder's client puts
+  // its native identity on when it has one. Only one this process has
+  // already read (a check-in) is used, so a chat never waits on, or is the
+  // first to run, Qoder's helper; one an hour old is read again behind the
+  // chat, as the desktop client renews its own hourly. {}: none yet.
+  const readIdentities = new Map()
+  const chatIdentity = (uid) => {
+    const known = uid ? readIdentities.get(uid) : undefined
+    if (!known) return {}
+    const now = Date.now()
+    if (now - (known.tried ?? known.at) >= CAMPAIGN_MACHINE_TTL) {
+      known.tried = now
+      machineForCampaign(uid).catch(() => {})
+    }
+    return known.headers
   }
   // campaignIdentity: the headers a campaigns request carries, and why
   // there are none where the site goes on without them (Qoder CN).
@@ -2581,13 +2644,7 @@ const makePlugin = (site) => async ({ client }) => {
         ask.requestId = body.request_id
       }
       const wire = encodeBody(JSON.stringify(body))
-      const headers = {
-        ...cosyHeaders(CHAT_URL, cred, wire, siteOf(site, cred)),
-        Accept: "text/event-stream",
-        "Cache-Control": "no-cache",
-        "X-Model-Key": m.key,
-        "X-Model-Source": m.source,
-      }
+      const headers = chatHeaders(CHAT_URL, cred, wire, siteOf(site, cred), m, chatIdentity(cred.uid))
       // a refused call's stream is closed: Qoder keeps a 10605 stream open
       // after its one event, and a connection held open while the call is
       // waited out and sent again is one more the account holds
@@ -2856,4 +2913,4 @@ export async function QwenWorkEnterpriseAuthPlugin({ client }) {
 export const protocol = { makePlugin, deviceSignIn, openapi, siteOf }
 
 // for tests
-export const _internal = { typedUnions, Splitter, campaignRuntime, RUNTIMES, campaignPage, campaignTarget, vpcInstance, vpcSite, parseUsage, gfmt, when, failure, modelInfo, qoderBody, qoderMessages, cacheMarked, sessionOf, namedSession, taskOf, TASKS, TASK_MAX, TASK_IDLE, SESSION, SITES, decodeBody, events, QUEUE, queueState }
+export const _internal = { chatHeaders, machineOS, machineHostname, cosyHeaders, typedUnions, Splitter, campaignRuntime, RUNTIMES, campaignPage, campaignTarget, vpcInstance, vpcSite, parseUsage, gfmt, when, failure, modelInfo, qoderBody, qoderMessages, cacheMarked, sessionOf, namedSession, taskOf, TASKS, TASK_MAX, TASK_IDLE, SESSION, SITES, decodeBody, events, QUEUE, queueState }
