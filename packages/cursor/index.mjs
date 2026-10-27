@@ -773,14 +773,31 @@ function fromUsable(fam, effort, fast) {
   return (at && vs.find((u) => u.effort === at)) || vs.find((u) => u.effort === "") || vs.find((u) => u.effort === "medium") || vs[0]
 }
 
-// usableTitle is a usable id's name without what the id says apart: the
+// usableTitle is a usable id's name without what the id says apart: its
 // effort, fast, and the 1M Cursor names every Max-capable Claude with
-// ("Claude Opus 5.5 1M Low" is Claude Opus 5.5).
-function usableTitle(name) {
-  const drop = new Set(["low", "medium", "high", "xhigh", "extra", "max", "minimal", "none", "fast", "1m", "(1m)"])
-  const ws = name.split(" ")
-  while (ws.length > 1 && drop.has(ws.at(-1).toLowerCase())) ws.pop()
-  return ws.join(" ")
+// ("Claude Opus 5.5 1M Low" is Claude Opus 5.5), wherever Cursor puts
+// them: "Claude Opus 5 1M Medium Thinking" is Claude Opus 5 Thinking, as
+// its efforts are magpie's reasoning levels and not models of their own
+// (ysm119 on Discord read "Medium" in the name as the only tier). A word
+// of the model's own name stays: GPT-5.1 Codex Max at high is "GPT-5.1
+// Codex Max".
+const EFFORT_WORDS = { none: ["None"], minimal: ["Minimal"], low: ["Low"], medium: ["Medium"], high: ["High"], xhigh: ["Extra High", "XHigh"], max: ["Max"] }
+function usableTitle(u) {
+  const ws = u.name.split(" ")
+  // the last time a phrase is said, past the name's first word
+  const cutLast = (phrase) => {
+    const p = phrase.toLowerCase().split(" ")
+    for (let i = ws.length - p.length; i >= 1; i--) {
+      if (p.every((w, k) => ws[i + k].toLowerCase() === w)) {
+        ws.splice(i, p.length)
+        return true
+      }
+    }
+    return false
+  }
+  for (const p of EFFORT_WORDS[u.effort] ?? []) if (cutLast(p)) break
+  if (u.fast) cutLast("fast")
+  return ws.filter((w, i) => i === 0 || !/^\(?1m\)?$/i.test(w)).join(" ") || u.name
 }
 
 // modelsOf is the picker's models as offered: one entry for each context
@@ -833,7 +850,7 @@ function modelsOf(picker, ids, listed = []) {
     const def = fromUsable(fam, "", false)
     // Cursor's context for it isn't known: its default's, as for a model
     // the picker gives no limit for
-    out.push({ id: family, run: family, name: usableTitle(def.name), title: usableTitle(def.name), pid: "", levels, fast: false, variants: [], def: undefined, partial: false, model: { name: family }, fam, ids, usableOnly: true, context: DEFAULT_CONTEXT, size: "", offersFast: fam.some((u) => u.fast) })
+    out.push({ id: family, run: family, name: usableTitle(def), title: usableTitle(def), pid: "", levels, fast: false, variants: [], def: undefined, partial: false, model: { name: family }, fam, ids, usableOnly: true, context: DEFAULT_CONTEXT, size: "", offersFast: fam.some((u) => u.fast) })
   }
   return out
 }
@@ -1013,6 +1030,21 @@ function named(raw, id) {
     const u = e.fam.find((x) => x.id === id)
     if (u) return { entry: e, seed: undefined, effort: u.effort, fast: u.fast }
     if (e.id === of.family) return { entry: e, seed: undefined, effort: of.effort, fast: of.fast }
+  }
+  // a family neither has, where the account has the same model with
+  // thinking or without it (claude-haiku-5-5-thinking, which 0.1.x listed,
+  // on a Team account whose list has Claude Haiku 5.5 without a thinking
+  // id; ysm119 on Discord): that one, at the id's effort, never the id as
+  // it is, which Cursor answers "AI Model Not Found"
+  const loose = (f) => f.replace(/-thinking$/, "")
+  const key = loose(of.family)
+  for (const e of models) {
+    if (e.usableOnly) {
+      if (loose(e.id) === key) return { entry: e, seed: undefined, effort: of.effort, fast: of.fast }
+      continue
+    }
+    const vs = e.variants.filter((v) => v.legacySlug && loose(familyOf(v.legacySlug).family) === key)
+    if (vs.length) return as(e, vs, of.effort)
   }
   // an id at a context size the list no longer has (claude-opus-5-5@1m,
   // picked from an earlier list, or from another account's): the model at

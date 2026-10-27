@@ -378,3 +378,65 @@ test("a picker that covers every usable id is listed as before", async () => {
   const raw = await usable(tok())
   expect(raw.some((m) => m.usableOnly)).toBe(false)
 })
+
+// ysm119 on Discord again (after 0.2.24): the Team account's list showed
+// "Claude Opus 5 1M Medium Thinking", "Claude Opus 4.7 1M Medium Thinking",
+// "Claude Sonnet 4.6 1M Thinking" and "Claude Haiku 5.5" (Cursor's names,
+// word for word), read as one tier each, and claude-haiku-5-5-thinking, an
+// id 0.1.x listed and still picked, failed its test. The names are the
+// reporter's; the ids are Cursor's pattern for them (claude-opus-5-thinking-
+// high is one the picker names), as the reporter's list wasn't sent.
+const TIERED = [
+  ...["low", "medium", "high", "xhigh", "max"].map((e) => ({ modelId: "claude-opus-5-thinking-" + e, displayName: "Claude Opus 5 1M " + { low: "Low", medium: "Medium", high: "High", xhigh: "Extra High", max: "Max" }[e] + " Thinking" })),
+  ...["low", "medium", "high"].map((e) => ({ modelId: "claude-opus-4-7-thinking-" + e, displayName: "Claude Opus 4.7 1M " + { low: "Low", medium: "Medium", high: "High" }[e] + " Thinking" })),
+  { modelId: "claude-opus-4-7-thinking-medium-fast", displayName: "Claude Opus 4.7 1M Medium Thinking Fast", maxMode: true },
+  { modelId: "claude-sonnet-4-6-thinking", displayName: "Claude Sonnet 4.6 1M Thinking" },
+  { modelId: "claude-haiku-5-5", displayName: "Claude Haiku 5.5" },
+  ...["low", "medium", "high"].map((e) => ({ modelId: "gpt-5.1-codex-max-" + e, displayName: "GPT-5.1 Codex Max " + { low: "Low", medium: "Medium", high: "High" }[e] })),
+  { modelId: "gpt-5.1-codex-max-max", displayName: "GPT-5.1 Codex Max Max" },
+]
+
+test("a usable-only family is named without its tier, wherever Cursor says it, and offers the tiers as efforts", async () => {
+  fakeAPI([], TIERED)
+  const raw = await usable(tok())
+  const of = (id) => raw.find((m) => m.id === id)
+  expect(["claude-opus-5-thinking", "claude-opus-4-7-thinking", "claude-sonnet-4-6-thinking", "claude-haiku-5-5", "gpt-5.1-codex-max"].map((id) => [id, of(id)?.name])).toEqual([
+    ["claude-opus-5-thinking", "Claude Opus 5 Thinking"],
+    ["claude-opus-4-7-thinking", "Claude Opus 4.7 Thinking"],
+    ["claude-sonnet-4-6-thinking", "Claude Sonnet 4.6 Thinking"],
+    ["claude-haiku-5-5", "Claude Haiku 5.5"],
+    ["gpt-5.1-codex-max", "GPT-5.1 Codex Max"],
+  ])
+  expect(Object.keys(of("claude-opus-5-thinking").levels)).toEqual(["low", "medium", "high", "xhigh", "max"])
+  expect(of("claude-opus-4-7-thinking").offersFast).toBe(true)
+  // one entry a family: no tier is listed as a model of its own
+  expect(raw.length).toBe(5)
+  const q = (id, effort = "", fast) => request(raw, id, effort, fast).id
+  expect(q("claude-opus-5-thinking")).toBe("claude-opus-5-thinking-medium")
+  expect(q("claude-opus-5-thinking", "xhigh")).toBe("claude-opus-5-thinking-xhigh")
+  expect(q("claude-opus-4-7-thinking", "medium", true)).toBe("claude-opus-4-7-thinking-medium-fast")
+  expect(q("gpt-5.1-codex-max", "max")).toBe("gpt-5.1-codex-max-max")
+})
+
+test("an id 0.1.x listed with thinking runs as the model without it when that is all the account has", async () => {
+  fakeAPI([], TIERED)
+  const raw = await usable(tok())
+  const q = (id, effort = "", fast) => request(raw, id, effort, fast).id
+  // the reporter's pick: Cursor answered the id as it was "AI Model Not Found"
+  expect(q("claude-haiku-5-5-thinking")).toBe("claude-haiku-5-5")
+  expect(q("claude-haiku-5-5-thinking", "low")).toBe("claude-haiku-5-5")
+  expect(q("claude-haiku-5-5-thinking-high")).toBe("claude-haiku-5-5")
+  // and the other way: an id without thinking, on a model listed with it only
+  expect(q("claude-opus-5", "high")).toBe("claude-opus-5-thinking-high")
+  expect(q("claude-sonnet-4-6")).toBe("claude-sonnet-4-6-thinking")
+  // nothing of it anywhere: as it is named
+  expect(q("claude-nothing-thinking")).toBe("claude-nothing-thinking")
+})
+
+test("a picker model with thinking variants only takes an id 0.1.x listed without thinking", async () => {
+  const haiku = PICKER.find((m) => m.name === "claude-haiku-5-5")
+  const thinkingOnly = { ...haiku, variants: haiku.variants.filter((v) => v.legacySlug.includes("thinking")) }
+  fakeAPI([thinkingOnly], null)
+  const raw = await usable(tok())
+  expect(request(raw, "claude-haiku-5-5-low", "", undefined).id).toBe("claude-haiku-5-5-thinking-low")
+})
