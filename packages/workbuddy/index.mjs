@@ -6,7 +6,8 @@
 // the token as WorkBuddy's desktop app does) or is taken from WorkBuddy
 // desktop's own sign-in. Its chats are chat completions at <endpoint>/v2,
 // streamed only, with WorkBuddy's headers: a request whose User-Agent isn't
-// WorkBuddy/<version> is refused (error 10085).
+// WorkBuddy/<version> is refused (error 10085). Each build's headers are
+// those of its current desktop app (see SITES' app, cli and appName).
 
 import { createHash, randomBytes } from "node:crypto"
 import { readFileSync } from "node:fs"
@@ -14,7 +15,6 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 
 const APP_VERSION = "2.0.0" // the version WorkBuddy's sign-in page is opened with
-const UA_VERSION = "5.5.6" // WorkBuddy/<this> is the User-Agent the API takes
 const POLL_MS = 1000
 const SIGN_IN_MS = 5 * 60 * 1000
 const EARLY_MS = 60 * 1000 // a token this close to its end is refreshed before a request
@@ -67,6 +67,16 @@ const SITES = {
     authID: "workbuddy-desktop",
     platform: "workbuddy",
     ai: false,
+    // the desktop app the requests are WorkBuddy's own client's of: its
+    // version, its bundled CLI's (@genie/agent-cli), and the CLI's
+    // product.json applicationName. Read from WorkBuddy 5.9.3.42398134,
+    // the update feed's current build on 2026-10-28.
+    app: "5.9.3",
+    cli: "2.165.0",
+    appName: "WorkBuddy",
+    // 5.9's CLI says on each chat where the agent runs; the desktop's own
+    // is "local-agent" (X-Agent-Runtime, absent in 5.8)
+    runtime: "local-agent",
     // where this build's API keys are made (see keyAccount)
     keys: "https://www.workbuddy.cn/profile/keys",
     models: CN_MODELS,
@@ -81,6 +91,11 @@ const SITES = {
     authID: "workbuddy-desktop-ai",
     platform: "workbuddy-ai",
     ai: true,
+    // WorkBuddy AI 5.8.4.41366630, its update feed's current build on
+    // 2026-10-28 (see the China build's)
+    app: "5.8.4",
+    cli: "2.161.0",
+    appName: "workbuddy-ai",
     keys: "https://www.workbuddy.ai/profile/keys",
     models: AI_MODELS,
     // models whose images WorkBuddy AI drops though its config says they
@@ -155,7 +170,7 @@ async function call(site, method, path, headers = {}, body) {
     headers: {
       "Content-Type": "application/json",
       Accept: "application/json",
-      "User-Agent": "WorkBuddy/" + UA_VERSION,
+      "User-Agent": "WorkBuddy/" + site.app,
       ...headers,
     },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -312,15 +327,51 @@ function sign(site, a, headers) {
   }
   headers.set("X-Product", "SaaS")
   headers.set("X-IDE-Type", "WorkBuddy")
-  headers.set("User-Agent", "WorkBuddy/" + UA_VERSION)
+  headers.set("User-Agent", cliAgent(site))
   headers.set("X-Requested-With", "XMLHttpRequest")
   headers.set("X-Agent-Intent", "craft")
   headers.set("X-Agent-Purpose", "conversation")
   headers.set("X-IDE-Name", "WorkBuddy")
-  headers.set("X-IDE-Version", UA_VERSION)
+  headers.set("X-IDE-Version", site.app)
   for (const [k, v] of Object.entries(enterpriseHeaders(a))) headers.set(k, v)
-  if (!site.ai) return
+}
+
+// cliAgent is the User-Agent WorkBuddy's desktop CLI sends its API calls
+// (a chat, the product config) with: UserAgentHttpInterceptor's
+// buildUserAgent puts the platform (CLIENT_INFO_PLATFORM "WorkBuddy", at
+// the app's version) first, then the CLI's applicationName at the same
+// version, then CLIENT_INFO_USER_AGENT_EXTENSION, "CLI/<its version>".
+function cliAgent(site) {
+  return `WorkBuddy/${site.app} ${site.appName}/${site.app} CLI/${site.cli}`
+}
+
+// OPENAI_SDK and NODE are what the CLI's chats go out through: the OpenAI
+// SDK it bundles (openai 6.25.0) and the Node its Electron runs it on
+// (Electron 37.10.3, ELECTRON_RUN_AS_NODE).
+const OPENAI_SDK = "6.25.0"
+const NODE = "v22.21.1"
+const SDK_OS = { darwin: "MacOS", win32: "Windows", linux: "Linux", freebsd: "FreeBSD", openbsd: "OpenBSD", android: "Android" }
+const SDK_ARCH = { x64: "x64", arm64: "arm64", arm: "arm", ia32: "x32", x32: "x32" }
+
+// chatHeaders sets on a chat what WorkBuddy's CLI adds to its model
+// requests alone (axiosToFetchAdapter, both builds): the agent type
+// (resolveModelCallAgentType, "main" for the conversation's own agent),
+// the runtime where a build sends one, and the OpenAI SDK's own headers,
+// which the CLI's fetch passes on. Its client has a 1200s timeout and
+// no retries of its own.
+function chatHeaders(site, headers) {
   headers.set("X-Agent-Type", "main")
+  if (site.runtime) headers.set("X-Agent-Runtime", site.runtime)
+  else headers.delete("X-Agent-Runtime")
+  headers.set("Accept", "application/json")
+  headers.set("X-Stainless-Retry-Count", "0")
+  headers.set("X-Stainless-Timeout", "1200")
+  headers.set("X-Stainless-Lang", "js")
+  headers.set("X-Stainless-Package-Version", OPENAI_SDK)
+  headers.set("X-Stainless-OS", SDK_OS[process.platform] ?? (process.platform ? `Other:${process.platform}` : "Unknown"))
+  headers.set("X-Stainless-Arch", SDK_ARCH[process.arch] ?? (process.arch ? `other:${process.arch}` : "unknown"))
+  headers.set("X-Stainless-Runtime", "node")
+  headers.set("X-Stainless-Runtime-Version", NODE)
 }
 
 // keyAccount is the account an API key (OpenCode's {type: "api", key}) is
@@ -1459,7 +1510,7 @@ const statusText = (n) => STATUS_TEXT[n] || `HTTP ${n}`
 function meterAsked(site, a, path, body = {}, signal = AbortSignal.timeout(20000)) {
   return fetch(site.endpoint + path, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json", "User-Agent": "WorkBuddy/" + UA_VERSION,
+    headers: { "Content-Type": "application/json", Accept: "application/json", "User-Agent": "WorkBuddy/" + site.app,
       Authorization: "Bearer " + a.access, "X-User-Id": a.uid ?? "", "X-Domain": domainOf(site, a), "X-Product": "SaaS",
       "X-IDE-Type": "WorkBuddy", ...enterpriseHeaders(a) },
     body: JSON.stringify(body),
@@ -1992,7 +2043,7 @@ function effortsOf(d, site, id) {
 async function liveModels(site, a) {
   const headers = new Headers()
   sign(site, a, headers)
-  headers.set("User-Agent", `CLI/${APP_VERSION} WorkBuddy/${UA_VERSION}`)
+  headers.set("User-Agent", cliAgent(site))
   headers.set("X-Requested-With", "XMLHttpRequest")
   headers.set("Accept", "application/json")
   const res = await fetch(site.endpoint + "/v3/config", { headers, signal: AbortSignal.timeout(15000) })
@@ -2242,6 +2293,7 @@ function makePlugin(site) {
             } else {
               body = withoutUnsigned(body)
             }
+            chatHeaders(site, headers)
             attend(headers, body, session)
             const post = (b) =>
               fetch(req ? req.url : input, { ...init, method: init?.method ?? req?.method, headers, body: b }).catch((e) => unanswered(site, a, b, e, init?.signal))
