@@ -827,7 +827,14 @@ function modelsOf(picker, ids, listed = []) {
     const def = defaultVariant({ variants })
     const { pid, levels: all } = effortsOf(defs)
     const levels = Object.fromEntries(Object.entries(all).filter(([, value]) => has(pid, value)))
-    const fam = fams.get(familyOf(def?.legacySlug || m.name).family) ?? []
+    // the usable ids of its default's family, else of the same model with
+    // thinking or without it: a Team's picker can default Claude Haiku 5.5
+    // to thinking while cursor-agent lists it as claude-haiku-5-5 alone
+    // (ysm119 on Discord, after 0.2.25), and a variant id it lacks is then
+    // asked as that one, as named() takes such an id
+    const own = familyOf(def?.legacySlug || m.name).family
+    const bare = own.replace(/-thinking$/, "")
+    const fam = fams.get(own) ?? fams.get(bare) ?? fams.get(bare + "-thinking") ?? []
     const base = { run: m.name, title: clean(m.clientDisplayName || m.name), pid, levels, fast: !!defs.fast?.length, variants, def, partial, model: m, fam, ids }
     const contexts = (defs.context ?? []).filter((c) => has("context", c))
     if (contexts.length) {

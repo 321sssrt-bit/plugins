@@ -440,3 +440,19 @@ test("a picker model with thinking variants only takes an id 0.1.x listed withou
   const raw = await usable(tok())
   expect(request(raw, "claude-haiku-5-5-low", "", undefined).id).toBe("claude-haiku-5-5-thinking-low")
 })
+
+// ysm119 on Discord again, after 0.2.25: claude-haiku-5-5-thinking still
+// failed its test. A Team account's picker can have Claude Haiku 5.5, its
+// default with thinking, while cursor-agent models lists Haiku under one id
+// of another family (claude-haiku-5-5, no thinking). The entry's family was
+// its default's alone, which the account hasn't got, so every Haiku id went
+// out as a picker variant Cursor answers "AI Model Not Found".
+test("a picker model whose usable id is of its other family, with or without thinking, goes as that id", async () => {
+  const opus = OPUS55_USABLE.filter((m) => /-(medium|high)(-fast)?$/.test(m.modelId))
+  for (const haiku of [["claude-haiku-5-5"], ["claude-haiku-5-5-thinking"], ["claude-haiku-5-5-low", "claude-haiku-5-5-high"], ["claude-haiku-5-5-thinking-low"]]) {
+    fakeAPI(PICKER, [...opus, ...REST_USABLE, ...haiku])
+    const raw = await usable(tok())
+    for (const id of ["claude-haiku-5-5-thinking", "claude-haiku-5-5", "claude-haiku-5-5@300k", "claude-haiku-5-5@1m", "claude-haiku-5-5-thinking-high", "claude-haiku-5-5-low", "claude-haiku-5-5-thinking-low"])
+      for (const effort of ["", "none", "low", "medium", "high", "max"]) expect([haiku, id, effort, haiku.includes(request(raw, id, effort, undefined).id)]).toEqual([haiku, id, effort, true])
+  }
+})

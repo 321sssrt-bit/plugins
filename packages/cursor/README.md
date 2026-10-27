@@ -210,7 +210,10 @@ minutes), the way pi-cursor-sdk lists Cursor's catalog:
   them), fast the request's `service_tier`.
 - An id for a model with thinking that the account lists only without it
   (`claude-haiku-5-5-thinking` when the list has Claude Haiku 5.5 alone),
-  or the other way round, runs as the model the account has.
+  or the other way round, runs as the model the account has. So does a
+  picker model whose default thinks while the account lists it only
+  without thinking (`claude-haiku-5-5`), or the other way round: each of
+  its variant ids goes as the id the account lists.
 - An `@<size>` id the list no longer has (`claude-opus-5-5@1m` when only
   300k is listed, or the model is listed unsized) runs at the model's
   nearest size, in Max Mode when the size asked for is over the model's
