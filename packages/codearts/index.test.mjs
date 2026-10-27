@@ -1085,6 +1085,34 @@ test("a 429 that queues the request is waited out the agent's way, then sent aga
   assert.ok(calls.every((c) => String(c[2]).startsWith("SDK-HMAC-SHA256 ")))
 })
 
+// With another candidate after it (magpie's X-Magpie-Fallback), a queued
+// request isn't waited out: it leaves the queue, and a 503 with the queue's
+// retry-after goes back at once for magpie to ask the next (axuhere on X: a
+// free model held in a queue while another provider could answer). The
+// header never goes on to CodeArts.
+test("told another candidate follows, a queued request leaves the queue and is answered at once", async () => {
+  const cred = await makeCred()
+  const calls = []
+  let deleted
+  const sawDelete = new Promise((r) => { deleted = r })
+  const fetcher = async (url, init) => {
+    calls.push([init.method, String(url), new Headers(init.headers).get("x-magpie-fallback")])
+    if (init.method === "DELETE") deleted()
+    if (String(url) === x.TRACE_QUEUE_URL("T9")) return new Response(JSON.stringify({ status: "queued", retry_after: 30 }), { status: 200 })
+    return new Response("{}", { status: 429, headers: { "queue-status": "queued", "trace-id": "T9", "retry-after": "20" } })
+  }
+  const plugin = await CodeArtsAuthPlugin({ client: {} }, { fetch: fetcher })
+  const loaded = await plugin.auth.loader(async () => makeAuth(cred))
+  const init = chatInit({ model: "GLM-5.2", messages: [] })
+  const res = await loaded.fetch(CHAT_URL, { ...init, headers: { ...Object.fromEntries(new Headers(init.headers)), "x-magpie-fallback": "1" } })
+  assert.equal(res.status, 503)
+  assert.equal(res.headers.get("retry-after"), "20")
+  assert.match((await res.json()).error.message, /CodeArts queued the request; try again in 20s/)
+  await sawDelete
+  assert.deepEqual(calls.map((c) => [c[0], c[1]]), [["POST", CHAT_URL], ["DELETE", x.TRACE_QUEUE_URL("T9")]])
+  assert.ok(calls.every((c) => c[2] === null))
+})
+
 test("giving up in the queue takes the request out of it", async () => {
   const cred = await makeCred()
   const calls = []

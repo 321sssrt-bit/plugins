@@ -157,6 +157,8 @@ const SESSION_HEADER = "x-ot-session-id"
 // sends the request again, and DELETEs it when it gives up.
 const TRACE_QUEUE_URL = (traceId) => `${SNAP_HOST}/api/v1/concurrency/trace-queues/${encodeURIComponent(traceId)}`
 const QUEUE_BUDGET_MS = 300_000
+/** magpie's: "1" when another candidate follows this request. */
+const FALLBACK_HEADER = "x-magpie-fallback"
 // Every chat of an account goes out under its one session id, so this gate is
 // what keeps the account within the vendor's 3 sessions: an option may only
 // lower it.
@@ -1484,6 +1486,11 @@ async function signedFetch(cred, input, init, context) {
   if (!isSignedHostUrl(url)) return errorResponse(400, "", refusalTo(url))
   const method = String(init?.method ?? req?.method ?? "GET").toUpperCase()
   const baseHeaders = new Headers(init?.headers ?? req?.headers)
+  // magpie says another account, provider or group member follows this
+  // request (X-Magpie-Fallback): a queued request isn't waited out then.
+  // magpie's own header, never CodeArts'
+  const fallback = baseHeaders.get(FALLBACK_HEADER) === "1"
+  baseHeaders.delete(FALLBACK_HEADER)
   let body
   if (init?.body != null) body = await toBytes(init.body)
   else if (req) body = new Uint8Array(await req.clone().arrayBuffer())
@@ -1553,6 +1560,13 @@ async function signedFetch(cred, input, init, context) {
         const queued = queueInfoOf(res.headers)
         if (queued) {
           void res.body?.cancel().catch(() => {})
+          if (fallback) {
+            // the next candidate is asked at once: this one leaves the
+            // queue, and says why it gave way and when to ask it again
+            void traceQueueCall("DELETE", active, queued.traceId, context, AbortSignal.timeout(REQUEST_TIMEOUT_MS)).catch(() => {})
+            const wait = Math.max(1, Math.ceil(queued.retryAfter))
+            return errorResponse(503, "", `CodeArts queued the request; try again in ${wait}s`, { "retry-after": String(wait) })
+          }
           queueDeadline ||= Date.now() + (context.queueBudgetMs ?? QUEUE_BUDGET_MS)
           if ((await waitInQueue(active, queued, context, signal, queueDeadline)) === "promoted") continue
           return errorResponse(429, "", "排队等待超时或已被移出队列，请稍后再试")

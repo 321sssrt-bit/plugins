@@ -58,7 +58,10 @@ signing in, a short built-in catalog stands in.
   `x-ot-session-id`; the plugin sends one stable session id per account (and a fresh trace per
   request) like the client, keeps at most 3 chats in flight per account, retries
   `TM.00001041` with backoff, and waits in the gateway's own queue (`429` +
-  `queue-status: queued`) the way the client does. Only then does magpie get a `429`.
+  `queue-status: queued`) the way the client does. Only then does magpie get a `429`. Since
+  0.2.3, when magpie has another candidate after this request (`x-magpie-fallback: 1`), a queued
+  request leaves the queue at once and answers `503` with the queue's `Retry-After`
+  ("CodeArts queued the request; try again in 20s"), and magpie asks the next.
 - Chats always go upstream as streams — CodeArts meters only streamed answers — and are folded
   back into one `chat.completion` when the caller asked for JSON.
 - `thinking: { type: "enabled" }` is sent unless the caller set it, so the reasoning lands in
@@ -123,7 +126,7 @@ magpie 里使用其 GLM、DeepSeek、openPangu 等模型。provider id：`codear
   客户端一致；当天还没领取时遇到 `benefit not found` 也会先领取再重发）。每个模型的「消耗系数」作为 magpie 的倍率上报，来自账号主智能体（`build`）的模型列表。
 - **请求**：SDK-HMAC-SHA256 签名，只签给码道自己的两个主机（`snap-access.cn-north-4.myhuaweicloud.com`、
   `opengw.developer.huaweicloud.com`），发往其他地址（如改过的 `api`）的请求在凭据发出前就被拒绝，签名请求和令牌请求都不跟随重定向；像客户端一样发送 `x-ot-session-id` 会话头（每账号一个会话），账号内
-  在途请求不超过 3 个，`TM.00001041` 退避重试，网关排队时按客户端的方式等待；总是以流式请求上游（码道
+  在途请求不超过 3 个，`TM.00001041` 退避重试，网关排队时按客户端的方式等待（0.2.3 起，magpie 在这个请求之后还有别的账号、供应商或路由组成员时（`x-magpie-fallback: 1`），排队的请求立即退出队列并以 `503` 加队列的 `Retry-After` 回答，magpie 随即改问下一个）；总是以流式请求上游（码道
   只对流式回答计量积分），调用方要非流式时折叠回 JSON；默认注入 `thinking: { type: "enabled" }`，思考与
   正文分开；200 里内嵌的错误换算为 `429` / `400` / `502` 并带厂商原话；码道只接受不超过 64 个字符的工具名，
   更长的（如 MCP 工具名）发出时缩为前 55 个字符 + `_` + 8 位 SHA-256，回答（流式与非流式）里的工具调用再换回原名。
