@@ -792,6 +792,28 @@ function callID(at, k, c) {
   return "call_" + createHash("sha256").update(`${at}\0${k}\0${c.function?.name ?? ""}\0${said}`).digest("hex").slice(0, 32)
 }
 
+// reasoningOf is the thinking an assistant turn of the chat carries back:
+// reasoning_content (DeepSeek's spelling, which magpie and most clients
+// send), else reasoning (OpenRouter's), else reasoning_details' text, ""
+// when it carries none.
+function reasoningOf(m) {
+  let text = ""
+  for (const k of ["reasoning_content", "reasoning"]) if (!text && typeof m[k] === "string") text = m[k]
+  if (!text && Array.isArray(m.reasoning_details)) text = m.reasoning_details.map((d) => (typeof d?.text === "string" ? d.text : typeof d?.summary === "string" ? d.summary : "")).join("")
+  // A blank one (magpie's gateway sends " " for a tool turn with no
+  // thinking) is no thinking at all.
+  return text.trim() ? text : ""
+}
+
+// An assistant turn's thinking goes back in reasoning_content, as Qoder's
+// own client sends it (qoder-agent-sdk, Qoder.app 0.x: its converter sets
+// reasoning_content on every earlier assistant turn that had thinking).
+// It was left out from the plugin's first version on, so a model behind
+// Qoder never saw what it had thought on the turns before (uk.jent on
+// Discord): on Qoder, DeepSeek-V4-Pro in a tool loop now recalls what its
+// thinking before the call said, and said it had none without it. A turn
+// with thinking and nothing else is still left out, as that client leaves
+// it.
 function qoderMessages(msgs) {
   const out = []
   const names = {}
@@ -850,7 +872,8 @@ function qoderMessages(msgs) {
         const args = c.function?.arguments
         return { id, type: "function", function: { name: c.function?.name, arguments: typeof args === "string" ? args : JSON.stringify(args ?? {}) } }
       })
-      out.push({ role: "assistant", content: textOf(m.content), tool_calls: calls })
+      const think = reasoningOf(m)
+      out.push({ role: "assistant", content: textOf(m.content), ...(think ? { reasoning_content: think } : {}), tool_calls: calls })
       const open = calls.map((c) => c.id)
       const kept = new Set()
       for (let j = i + 1; j < msgs.length && msgs[j].role === "tool"; j++) {
@@ -864,7 +887,8 @@ function qoderMessages(msgs) {
     if (m.role === "assistant") blocks = blocks.filter((b) => b.type === "text")
     if (!blocks.length) continue
     if (m.role === "user" && seen.length) [blocks, seen] = [[...seen, ...blocks], []]
-    out.push({ role: m.role, content: blocks })
+    const think = m.role === "assistant" ? reasoningOf(m) : ""
+    out.push({ role: m.role, content: blocks, ...(think ? { reasoning_content: think } : {}) })
     // a result after the assistant's own words answers no call before it
     turn = null
   }
