@@ -147,11 +147,28 @@ test("a wait held past the budget is the 503 with Retry-After it was, the reques
   const res = await fetch(API_CHAT, ask())
   expect(res.status).toBe(503)
   expect(res.headers.get("Retry-After")).toBe("30")
-  expect((await res.json()).error.message).toBe("Qoder queued the request for dfmodel (this plan's queue: p3); try again in 30s")
+  expect((await res.json()).error.message).toBe("Qoder queued the request for dfmodel (this plan's queue: p3, 3 ahead); try again in 30s")
   expect(sent.chats.length).toBe(1)
   // 30s pauses, the last cut to what was left of the budget
   expect(pauses.reduce((a, b) => a + b, 0)).toBe(QUEUE.budget)
   expect(Math.max(...pauses)).toBe(30_000)
+})
+
+// With another candidate after it (magpie's X-Magpie-Fallback: the model's
+// next account or provider, a routing group's next member), a queued
+// request isn't waited out: its 503 goes back at once, with where it stood
+// in the queue, and magpie asks the next (axuhere on X: a free model held
+// at "预计等待超过 10 分钟" while another provider could answer). The last
+// candidate isn't told, and waits as Qoder's client does (above).
+test("told another candidate follows, a queued request is answered at once with the queue's reason", async () => {
+  const { fetch, sent } = await loader({ chats: () => refused(), statuses: () => status(QUEUED) })
+  const res = await fetch(API_CHAT, { ...ask(), headers: { "x-magpie-fallback": "1" } })
+  expect(res.status).toBe(503)
+  expect(res.headers.get("Retry-After")).toBe("30")
+  expect((await res.json()).error.message).toBe("Qoder queued the request for dfmodel (this plan's queue: p3, 3 ahead); try again in 30s")
+  expect(sent.chats.length).toBe(1)
+  expect(sent.statuses.length).toBe(0)
+  expect(pauses).toEqual([])
 })
 
 test("the pause is the queue's retryAfterSeconds held to 0.5s..30s, and 30s when it says none", async () => {

@@ -897,6 +897,10 @@ function sessionOf(chat, named = "") {
 // conversation by, from the chat.headers hook to the loader's fetch. It
 // goes no further: nothing of the request's headers is sent to Qoder.
 const SESSION = "x-magpie-qoder-session"
+// FALLBACK is "1" when magpie has another candidate after this request
+// (another account, provider or routing group member): a queued request is
+// then answered at once rather than waited out
+const FALLBACK = "x-magpie-fallback"
 
 // namedSession is the session a chat.headers hook is told, "" when it
 // names none. magpie, with no session header from the agent, makes one of
@@ -1090,7 +1094,8 @@ function failure(status, text) {
     const n = Number(queue?.retryAfterSeconds)
     const wait = Number.isFinite(n) && n > 0 ? Math.ceil(n) : BUSY_WAIT
     const model = queue?.modelKey ? ` for ${queue.modelKey}` : ""
-    const tier = queue?.queueType ? ` (this plan's queue: ${queue.queueType})` : ""
+    const ahead = Number(queue?.queueCount) > 0 ? `, ${Math.floor(Number(queue.queueCount))} ahead` : ""
+    const tier = queue?.queueType ? ` (this plan's queue: ${queue.queueType}${ahead})` : ahead ? ` (${ahead.slice(2)})` : ""
     const what = queue?.isQueued === true ? "queued the request" : "is busy"
     return { status: 503, message: `Qoder ${what}${model}${tier}; try again in ${wait}s`, retryAfter: wait, signIn: "", queue: queue ?? {} }
   }
@@ -2547,7 +2552,7 @@ const makePlugin = (site) => async ({ client }) => {
     })
 
   // ask is the answer to a chat completion on the live account cred.
-  const ask = async (chat, cred, init, named = "") => {
+  const ask = async (chat, cred, init, named = "", fallback = false) => {
     let m
     try {
       m = (await models(cred)).find((x) => x.key === chat.model) ?? (await models(cred, true)).find((x) => x.key === chat.model)
@@ -2599,7 +2604,10 @@ const makePlugin = (site) => async ({ client }) => {
       if (f) call.abort()
       // an answered call moves its task on, as Qoder's client moves it
       if (!f) task.answered = true
-      if (!f?.queue || waited >= QUEUE.recoveries) return f ? errorResponse(f) : answer(open, chat, servedName)
+      // with another account, provider or group member after this one
+      // (magpie's X-Magpie-Fallback), a queued request isn't waited out:
+      // its 503 goes back at once, saying the queue, and the next is asked
+      if (!f?.queue || waited >= QUEUE.recoveries || fallback) return f ? errorResponse(f) : answer(open, chat, servedName)
       try {
         if (!(await queueWait(api, cred, ask, f.queue, init.signal, deadline, siteOf(site, cred)))) return errorResponse(f)
       } catch (e) {
@@ -2673,7 +2681,7 @@ const makePlugin = (site) => async ({ client }) => {
             }
             const h = new Headers(input instanceof Request ? input.headers : undefined)
             new Headers(init.headers ?? {}).forEach((v, k) => h.set(k, v))
-            return signed(await ask(chat, cred, init, h.get(SESSION)?.trim().slice(0, 128) ?? ""), renewed(cred))
+            return signed(await ask(chat, cred, init, h.get(SESSION)?.trim().slice(0, 128) ?? "", h.get(FALLBACK) === "1"), renewed(cred))
           },
         }
       },
