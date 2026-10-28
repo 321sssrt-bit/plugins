@@ -254,6 +254,17 @@ own spends the team's pool: On-demand shows the pool's spend and limit,
 with the member's own spend beside it, and the account is used up when
 the pool is.
 
+An Enterprise account's period has no Cursor Models, Other Models or Total
+in `GetCurrentPeriodUsage`: Cursor reports its overall allowance through
+the website's `usage-summary` instead. Magpie shows that as Enterprise,
+for example `49.45 / 800 USD · 6.2% used`, or
+`750.55 / 800 USD · 93.8% left` with Magpie's Used / Left choice, reset at
+the billing cycle's end. When the summary says team on-demand is enabled
+and unlimited or still has room, the Enterprise window is informational:
+reaching its included allowance doesn't count the account as used up.
+On-demand also shows the team's spend when known, with its limit when it
+has one. A reached on-demand limit counts the account as used up.
+
 Sign in to the Cursor account linked in Grok Bot. A linked SuperGrok
 subscription grants Bot access without a paid Cursor plan; see
 [Grok Bot plans and billing](https://cursor.com/help/grok-bot/plans).

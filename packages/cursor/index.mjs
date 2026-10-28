@@ -532,14 +532,79 @@ async function hardLimit(tok) {
 // dollars, thousands grouped: a team's pool runs to six figures ($451,200.00)
 const dollars = (n) => "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
-// usage is the account's windows this billing period; an enterprise plan
-// reports spend instead, and gets none. ids are the models it can be
-// asked for, each counted by the pool Cursor bills it to. An account that
-// may spend on-demand once its included usage is gone (fottencity on
+// enterpriseUsage is the allowance GetCurrentPeriodUsage leaves out on an
+// Enterprise account. That call answers with only the billing cycle there;
+// the website's usage-summary has individualUsage.overall, in cents, and
+// the account's membership. The CLI JWT is also the website's dashboard
+// session, as botUsage builds it. undefined when the summary says nothing
+// this can show, so a failed read stays an empty card, as before.
+async function enterpriseUsage(tok) {
+  try {
+    const subject = JSON.parse(Buffer.from(tok.split(".")[1], "base64url").toString()).sub
+    if (typeof subject !== "string") return undefined
+    const user = subject.split("|").filter(Boolean).at(-1)
+    if (!user || !/^[a-zA-Z0-9._-]+$/.test(user)) return undefined
+    const res = await fetch(WEBSITE + "/api/usage-summary", {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        Origin: WEBSITE,
+        Cookie: "WorkosCursorSessionToken=" + encodeURIComponent(user + "::" + tok),
+      },
+      redirect: "error",
+      signal: AbortSignal.timeout(15_000),
+    })
+    if (!res.ok) return undefined
+    const data = await res.json()
+    if (String(data?.membershipType).toLowerCase() !== "enterprise") return undefined
+    const overall = data?.individualUsage?.overall
+    if (overall?.enabled !== true) return undefined
+    const { used, limit } = overall
+    if (typeof used !== "number" || !Number.isFinite(used) || used < 0) return undefined
+    if (typeof limit !== "number" || !Number.isFinite(limit) || limit <= 0) return undefined
+    const end = Date.parse(data.billingCycleEnd ?? "")
+    const resets = Number.isFinite(end) ? { resetsAt: new Date(end).toISOString() } : {}
+    const od = data.teamUsage?.onDemand
+    const spent = typeof od?.used === "number" && Number.isFinite(od.used) && od.used >= 0
+    const unlimited = od?.enabled === true && od.limit === null
+    const fixed = od?.enabled === true && typeof od.limit === "number" && Number.isFinite(od.limit) && od.limit > 0 && spent
+    // Only an explicitly unlimited budget or a measured budget with room
+    // lets a spent included allowance stay available to magpie's routing.
+    const aside = unlimited || (fixed && od.used < od.limit)
+    const windows = [{
+      name: "Enterprise",
+      used: Math.max(0, Math.min(100, (100 * used) / limit)),
+      display: `${dollars(used / 100)} / ${dollars(limit / 100)}`,
+      amount: used / 100,
+      limit: limit / 100,
+      unit: "USD",
+      ...resets,
+      ...(aside ? { aside: true } : {}),
+    }]
+    if (fixed) windows.push({
+      name: "On-demand",
+      used: Math.min(100, (100 * od.used) / od.limit),
+      display: `${dollars(od.used / 100)} / ${dollars(od.limit / 100)}`,
+      amount: od.used / 100,
+      limit: od.limit / 100,
+      unit: "USD",
+      ...resets,
+    })
+    else if (unlimited && spent) windows.push({ name: "On-demand", used: 0, display: dollars(od.used / 100), ...resets, aside: true })
+    return windows
+  } catch {
+    return undefined
+  }
+}
+
+// usage is the account's windows this billing period. ids are the models it
+// can be asked for, each counted by the pool Cursor bills it to. An account
+// that may spend on-demand once its included usage is gone (fottencity on
 // Discord: a team that pays for more) is still served when the pools are
 // spent, so they are shown aside, and its On-demand spend is what can run
 // out: at its limit (a team member with none of their own: the team's
-// pool), or never when it has none.
+// pool), or never when it has none. An Enterprise account's period has no
+// planUsage; its allowance comes from usage-summary instead.
 async function usage(tok, ids) {
   const [res, hard] = await Promise.all([
     fetch(API + "/aiserver.v1.DashboardService/GetCurrentPeriodUsage", {
@@ -553,7 +618,11 @@ async function usage(tok, ids) {
   if (!res.ok) return { error: statusText(res.status), windows: [] }
   const data = await res.json()
   const u = data?.planUsage
-  if (!u) return { windows: [] }
+  if (!u) {
+    // Prefer measured Enterprise usage before any reset-date-only fallback.
+    const windows = await enterpriseUsage(tok)
+    return windows ? { windows } : { windows: [] }
+  }
   const ms = /^[+-]?\d+$/.test(data.billingCycleEnd ?? "") ? Number(data.billingCycleEnd) : 0
   const resets = ms > 0 ? { resetsAt: new Date(ms).toISOString() } : {}
   const bucket = new Set((data.autoBucketModels ?? []).map(poolBase))
