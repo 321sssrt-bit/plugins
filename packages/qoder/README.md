@@ -472,6 +472,19 @@ the plugin factory and its pieces, for another service on this same
 protocol (QwenWork ships here; a future one can too). Its shape is not a
 stable API — it changes as the packages on it need.
 
+## Free models when the credits run out
+
+Qoder serves its free models after the credits are used up: "When Credits
+run out, you can continue using free basic models, subject to daily and
+monthly limits" ([docs.qoder.com/Credits](https://docs.qoder.com/Credits);
+the zh page says the same). So the credit windows the usage hook gives
+(Qoder and Qoder CN, since 0.2.46) name the account's free models in
+`notModels`: a model listed at 0× (not a discount's 0 for a while), from the
+account's own model list. magpie then doesn't count those models as spent
+on a used-up account, or on a free account's "0 credits left". A list that
+can't be read leaves every model counted. QwenWork reads its usage
+elsewhere and is not changed.
+
 ## Not here
 
 - Qoder's usage and quota display.

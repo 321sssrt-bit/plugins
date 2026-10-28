@@ -2515,6 +2515,26 @@ const makePlugin = (site) => async ({ client }) => {
       return dt.token
     })
 
+  // spareFree has the credit windows not count the models that cost none
+  // (notModels): Qoder's own docs say "When Credits run out, you can
+  // continue using free basic models, subject to daily and monthly limits"
+  // (docs.qoder.com/Credits; the zh page the same: "Credits 用尽后，仍可使用
+  // 免费基础模型"). Counted, a plan used up (or a free account's "0 credits
+  // left") put the account last for Qwen3.8-Flash and DeepSeek-Flash too,
+  // which it still serves (coeo91 on Discord). Free is the listing's own
+  // price (freeOf: 0×, not a discount's 0 for a while). A listing that can't
+  // be read leaves every model counted, as before. Qoder and Qoder CN only:
+  // QwenWork reads its usage elsewhere and says nothing of free models.
+  const spareFree = async (cred, out) => {
+    if (!out?.windows?.length) return out
+    let free = []
+    try {
+      free = (await models(cred)).filter((m) => m.free).map((m) => m.key)
+    } catch {}
+    if (free.length) for (const w of out.windows) w.notModels = free
+    return out
+  }
+
   // usage is the account's allowance, magpie's own hook. signIn is what the read means for the sign-in, as the built-in's did:
   // a refused job refresh marks it, a renewed one clears it, and nothing
   // else does — not a clean read, nor a refused device token, which serves
@@ -2562,7 +2582,7 @@ const makePlugin = (site) => async ({ client }) => {
       // no second token here to rotate and retry with.
       if (cred.patAuth && !cred.deviceToken) {
         const env = await fetchUsage(siteOf(site, cred), cred.access)
-        return { ...parseUsage(env), signIn }
+        return { ...(await spareFree(cred, parseUsage(env))), signIn }
       }
       let env
       try {
@@ -2571,7 +2591,7 @@ const makePlugin = (site) => async ({ client }) => {
         if (!(e instanceof UsageStatus) || (e.status !== 401 && e.status !== 403)) throw e
         env = await fetchUsage(siteOf(site, cred), await deviceToken(getAuth, cred.deviceToken))
       }
-      return { ...parseUsage(env), signIn }
+      return { ...(await spareFree(cred, parseUsage(env))), signIn }
     } catch (e) {
       return { error: e?.message ?? String(e), signIn: e?.expired ? "expired" : signIn }
     }
