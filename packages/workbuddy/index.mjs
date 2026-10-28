@@ -1738,14 +1738,31 @@ const compact = (n) => (Number.isInteger(n) ? String(n) : n.toFixed(2).replace(/
 // as used or left beside the share (magpie#659). The free plan is said as a
 // plan: "Free" alone beside the account read as the model being free, and
 // routing as preferring it for that (#337).
+//
+// A package with no CycleTotalCapacity has no denominator: it is sent as
+// magpie's balance-shaped window (#3950), {balance, unit} with no used,
+// limit or aside, and routing ranks it by what is left. A literal "0" total
+// is still a total, not a wallet: it stays on the old path, so a lapsed or
+// placeholder package adds nothing. A literal "0" remainder is a reading
+// of nothing left, not an absent field; only a package with no
+// CycleRemainCapacity at all leaves the window out. TotalCredits is not a
+// fallback: an account with no packages at all keeps its unknown allowance,
+// as before, so its free models are not skipped.
 function usageOf(sum, plan) {
   const out = { plan: plan || (sum?.IsPaidUser ? "Pro" : "Free plan"), windows: [] }
-  let total = 0, used = 0
+  let total = 0, used = 0, left = 0, bags = 0
   for (const p of sum?.Packages ?? []) {
-    total += capacity(p?.CycleTotalCapacity)
-    used += capacity(p?.CycleUsedCapacity)
+    const hasTotal = p?.CycleTotalCapacity != null && p.CycleTotalCapacity !== ""
+    if (hasTotal) {
+      total += capacity(p.CycleTotalCapacity)
+      used += capacity(p?.CycleUsedCapacity)
+    } else if (p?.CycleRemainCapacity != null && p.CycleRemainCapacity !== "") {
+      left += capacity(p.CycleRemainCapacity)
+      bags++
+    }
   }
   if (total > 0) out.windows.push({ name: "Credits", used: (100 * used) / total, display: `${compact(used)} / ${compact(total)}`, amount: used, limit: total, unit: "credits" })
+  if (bags > 0 && (total === 0 || left > 0)) out.windows.push({ name: "Prepaid credits", balance: left, display: `${compact(left)} credits`, unit: "credits" })
   return out
 }
 
