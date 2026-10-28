@@ -6,7 +6,7 @@
 // by a stand-in fetch, its agent API by an HTTP/2 server here.
 import "./nonet.mjs" // first: no request leaves this machine
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from "bun:test"
-import { createHash } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import http2 from "node:http2"
 import { CursorAuthPlugin, _internal } from "./index.mjs"
 import { NATIVE_LIMITS, nativeSessions } from "./native-session.mjs"
@@ -70,9 +70,11 @@ function fakeAPI(picker) {
   }
 }
 
+// a token of its own: another file's {exp} alone can be the same token,
+// and would find this file's endpoint and list kept for it
 let n = 0
 const signIn = () => {
-  const jwt = ["e30", Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 7200 + ++n })).toString("base64url"), "sig"].join(".")
+  const jwt = ["e30", Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 7200 + ++n, sub: "listwait-" + randomUUID() })).toString("base64url"), "sig"].join(".")
   return { type: "oauth", access: jwt, refresh: "", expires: 0, accountId: "a@b.c" }
 }
 

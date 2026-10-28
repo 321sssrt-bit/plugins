@@ -82,7 +82,7 @@ test("a model once for each context size, named with it and with that window", a
 test("the provider's list, efforts as variants, no model of its own for fast or an effort", async () => {
   fakeAPI()
   const hooks = await CursorAuthPlugin()
-  const jwt = ["e30", Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 7200 + ++n })).toString("base64url"), "s"].join(".")
+  const jwt = ["e30", Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 7200 + ++n, sub: "context-" + Math.random() })).toString("base64url"), "s"].join(".")
   const list = await hooks.provider.models({ models: {} }, { auth: { type: "oauth", access: jwt, refresh: "", expires: 0 } })
   expect(list["claude-opus-5-5@300k"].limit.context).toBe(300000)
   expect(Object.keys(list["claude-opus-5-5@300k"].variants)).toEqual(["low", "medium", "high", "xhigh", "max"])
@@ -95,7 +95,7 @@ test("fast is said on the models Cursor has a fast variant of, at that size, and
   const fastOf = async (usableIDs) => {
     fakeAPI(PICKER, usableIDs)
     const hooks = await CursorAuthPlugin()
-    const jwt = ["e30", Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 7200 + ++n })).toString("base64url"), "s"].join(".")
+    const jwt = ["e30", Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 7200 + ++n, sub: "context-" + Math.random() })).toString("base64url"), "s"].join(".")
     const list = await hooks.provider.models({ models: {} }, { auth: { type: "oauth", access: jwt, refresh: "", expires: 0 } })
     return Object.keys(list).filter((id) => list[id].fast === true).sort()
   }
