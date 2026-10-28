@@ -459,8 +459,28 @@ const SALT = randomBytes(16).toString("hex")
 
 // idFor is the 32 hex digits WorkBuddy's own ids are made of, made of a
 // name of the thing the id is for (a turn, a conversation) and what names it.
+// key is a string, or the pieces it is made of: the digest is the same
+// either way, and a key made of a 45 MiB message is never joined into one
+// string to be hashed (plugins#461). Each piece goes to the hash whole:
+// Bun reads a one-byte string's bytes in place, where a piece cut into
+// slices was measured costing a copy of each slice.
 function idFor(kind, key) {
-  return createHash("sha256").update(`${SALT}|${kind}|${key}`).digest("hex").slice(0, 32)
+  const h = createHash("sha256").update(`${SALT}|${kind}|`)
+  // a surrogate pair's first half ending one piece waits for the next, as
+  // the joined key would hold the pair together
+  let held = ""
+  for (let piece of typeof key === "string" ? [key] : key) {
+    if (held) piece = held + piece
+    held = ""
+    const c = piece.charCodeAt(piece.length - 1)
+    if (c >= 0xd800 && c <= 0xdbff) {
+      held = piece.slice(-1)
+      piece = piece.slice(0, -1)
+    }
+    h.update(piece)
+  }
+  if (held) h.update(held)
+  return h.digest("hex").slice(0, 32)
 }
 
 // signatureOf is a message content's signature: its text, and a digest of
@@ -469,14 +489,20 @@ function idFor(kind, key) {
 // clients of Anthropic's shape — is left out: it is not what the user said,
 // and it changes with every step of the send.
 function signatureOf(content) {
-  if (typeof content === "string") return content
-  if (!Array.isArray(content)) return ""
-  let out = ""
+  return signatureParts(content).join("")
+}
+
+// signatureParts is signatureOf in the pieces it is joined from, none empty
+function signatureParts(content) {
+  if (typeof content === "string") return content ? [content] : []
+  if (!Array.isArray(content)) return []
+  const out = []
   for (const part of content) {
     const type = part?.type ?? ""
-    if (type === "" || type === "text") out += typeof part?.text === "string" ? part.text : ""
-    else if (type !== "tool_result" && type !== "tool-result") {
-      out += `[${type}:${createHash("sha256").update(JSON.stringify(part)).digest("hex").slice(0, 8)}]`
+    if (type === "" || type === "text") {
+      if (typeof part?.text === "string" && part.text) out.push(part.text)
+    } else if (type !== "tool_result" && type !== "tool-result") {
+      out.push(`[${type}:${createHash("sha256").update(JSON.stringify(part)).digest("hex").slice(0, 8)}]`)
     }
   }
   return out
@@ -522,13 +548,18 @@ function hasBlock(m, type) {
 // has none at all: the caller then makes a fresh id for that request, as
 // before these were derived at all.
 function turnKey(chat) {
+  return turnParts(chat).join("")
+}
+
+// turnParts is turnKey in pieces (idFor takes them): [] for ""
+function turnParts(chat) {
   const msgs = Array.isArray(chat?.messages) ? chat.messages : []
   for (let i = msgs.length - 1; i >= 0; i--) {
     if (msgs[i]?.role !== "user" || answeredBefore(msgs, i)) continue
-    const sig = signatureOf(msgs[i].content)
-    return sig ? `u${i}:${sig}` : ""
+    const sig = signatureParts(msgs[i].content)
+    return sig.length ? [`u${i}:`, ...sig] : []
   }
-  return ""
+  return []
 }
 
 // conversationKey names the conversation a chat belongs to: the session
@@ -538,14 +569,19 @@ function turnKey(chat) {
 // conversation id is sent then: a made-up one would be a conversation of the
 // request's own, which is what fragments the usage detail in the first place.
 function conversationKey(chat, session) {
-  if (session) return `session:${session}`
+  return conversationParts(chat, session).join("")
+}
+
+// conversationParts is conversationKey in pieces (idFor takes them): [] for ""
+function conversationParts(chat, session) {
+  if (session) return [`session:${session}`]
   const msgs = Array.isArray(chat?.messages) ? chat.messages : []
   for (const m of msgs) {
     if (m?.role !== "user") continue
-    const sig = signatureOf(m.content)
-    if (sig) return `first:${sig}`
+    const sig = signatureParts(m.content)
+    if (sig.length) return ["first:", ...sig]
   }
-  return ""
+  return []
 }
 
 // isMessages says whether a request is an Anthropic Messages one, which
@@ -684,17 +720,17 @@ function attend(headers, body, session) {
 }
 
 function attendChat(headers, chat, session) {
-  const conv = conversationKey(chat, session)
+  const conv = conversationParts(chat, session)
   const msg = hex()
   headers.set("X-Conversation-Message-ID", msg)
   headers.set("X-Request-ID", msg)
   if (!headers.has("X-Conversation-Request-ID")) {
-    const turn = turnKey(chat)
+    const turn = turnParts(chat)
     // a turn is a conversation's own: two conversations whose user message
     // reads the same are still two sends, not one
-    headers.set("X-Conversation-Request-ID", turn ? idFor("turn", `${conv}|${turn}`) : hex())
+    headers.set("X-Conversation-Request-ID", turn.length ? idFor("turn", [...conv, "|", ...turn]) : hex())
   }
-  if (conv && !headers.has("X-Conversation-ID")) headers.set("X-Conversation-ID", idFor("conversation", conv))
+  if (conv.length && !headers.has("X-Conversation-ID")) headers.set("X-Conversation-ID", idFor("conversation", conv))
 }
 
 // FLAGGED are the words WorkBuddy refuses a chat for, "Illegal API
@@ -2237,13 +2273,19 @@ const AFTER_TOOLS_REFUSED = /must end with a user message|["']code["']\s*:\s*["'
 // ending with the assistant's message is a prefill, refused as it is.
 function replyAfterTools(body) {
   const b = chatOf(body)
+  return replyAfterToolsOn(b) ? JSON.stringify(b) : null
+}
+
+// replyAfterToolsOn makes replyAfterTools's change on a chat's object; false
+// for a chat it doesn't take
+function replyAfterToolsOn(b) {
   const msgs = b?.messages
-  if (!Array.isArray(msgs)) return null
+  if (!Array.isArray(msgs)) return false
   let i = msgs.length - 1
   while (i >= 0 && msgs[i]?.role === "user") i--
-  if (i === msgs.length - 1 || i < 0 || msgs[i]?.role !== "tool") return null
+  if (i === msgs.length - 1 || i < 0 || msgs[i]?.role !== "tool") return false
   msgs.splice(i + 1, 0, { role: "assistant", content: "" })
-  return JSON.stringify(b)
+  return true
 }
 
 // FREE_ONLY is the switch that keeps an account off credits (#430): its
@@ -2411,18 +2453,6 @@ function makePlugin(site) {
             sign(site, a, headers)
             let body = init?.body
             if (body === undefined && req) body = await req.clone().text()
-            // the switch is checked before anything is sent: a model not
-            // free, or one whose price can't be read, never reaches WorkBuddy
-            if (freeOnly()) {
-              const model = chatOf(typeof body === "string" ? body : bodyString(body))?.model
-              let list
-              try {
-                list = await listed(a)
-              } catch (e) {
-                return notFree(site, model, e?.message ?? String(e))
-              }
-              if (!list.some((m) => m.id === model && m.free)) return notFree(site, model)
-            }
             // An Anthropic request goes as the agent sent it: WorkBuddy
             // serves these models on Messages itself, and the rewrites
             // below (a default system message, the chat endpoint's
@@ -2433,12 +2463,26 @@ function makePlugin(site) {
             // Codex's and DeepSeek Harness's openings all answer on
             // /v1/messages, where a chat is refused 11128.
             const native = isMessages(req ? req.url : String(input), body)
-            let names = {}
-            const p = prepared(body, native)
-            let chat = p.chat
-            let changed = p.changed
-            body = p.body
-            if (!native) names = p.names
+            // read once (prepared): nothing below parses the body again on
+            // its way out, and nothing keeps the parsed chat once it is
+            // written (plugins#461)
+            let chat, changed, names
+            ;({ body, chat, changed, names } = prepared(body, native))
+            if (native) names = {}
+            // the switch is checked before anything is sent: a model not
+            // free, or one whose price can't be read, never reaches
+            // WorkBuddy. The model is read off the chat parsed above; a body
+            // prepared leaves unread (bytes on Messages) is read for it.
+            if (freeOnly()) {
+              const model = (chat ?? chatOf(typeof body === "string" ? body : bodyString(body)))?.model
+              let list
+              try {
+                list = await listed(a)
+              } catch (e) {
+                return notFree(site, model, e?.message ?? String(e))
+              }
+              if (!list.some((m) => m.id === model && m.free)) return notFree(site, model)
+            }
             // a chat that names no effort is asked at the model's default,
             // as WorkBuddy's client asks it (withDefaultEffort); with no
             // list to read (effortList) the chat goes as it came
@@ -2502,10 +2546,16 @@ function makePlugin(site) {
             // words at once (see systemAsUser)
             const sysKey = native ? "" : systemKeyOf(chat)
             if (sysKey && refusedSystems.has(sysKey) && systemAsUserOn(chat)) changed = true
+            // shaped is a body as such a model takes it. The first try's
+            // is made on the chat already parsed, after the move above,
+            // as shaped would make it of the body written; a resend with
+            // the system prompt moved (below) is shaped again, and a body
+            // that has the reply already is left as it is.
+            const shaped = (b) => (!native && endsAfterTools.has(model) ? replyAfterTools(b) ?? b : b)
+            if (!native && endsAfterTools.has(model) && replyAfterToolsOn(chat)) changed = true
             if (changed) body = JSON.stringify(chat)
             chat = null
-            const shaped = (b) => (!native && endsAfterTools.has(model) ? replyAfterTools(b) ?? b : b)
-            let res = await send(shaped(body))
+            let res = await send(body)
             // a signature WorkBuddy's own signing didn't make — a session
             // moved here from another provider keeps its thinking blocks,
             // and a truncated or altered one reads the same way — is 11159
@@ -2733,4 +2783,4 @@ export const WorkBuddyAuthPlugin = makePlugin(SITES.workbuddy)
 export const WorkBuddyAIAuthPlugin = makePlugin(SITES["workbuddy-ai"])
 
 // for tests
-export const _internal = { withDefaultEffort, defaultEffortOf, gzipped, FREE_ONLY, PRICE_TTL, keyAccount, remoteConfig, cycleOf, typeUnions, systemAsUser, systemKey, DEFAULT_SYSTEM, EDGE_READS, fitShape, replyAfterTools, AFTER_TOOLS_REFUSED, enterpriseUsageOf, notDesktop, textOnly, runsOutOf, packagesOf, endOf, enterpriseHeaders, enterpriseOf, liveModels, browserSignIn, withSystem, asReasoning, normalizeToolChoice, fitTools, fitted, renamed, unflagged, usageOf, desktopHeld, explained, REFUSED_HINT, RESTRICTED_HINT, EXHAUSTED_HINT, freeCredits, creditsOf, priceOf, fresh, SITES, renewing, renewed, SESSION, attend, turnKey, conversationKey, signatureOf, isMessages, withoutUnsigned, withoutSignedThinking, prepared, answeredBefore, nativeOf, modelOf, configModels, API_MESSAGES: NPM_MESSAGES, API_CHAT: NPM }
+export const _internal = { idFor, replyAfterToolsOn, withDefaultEffort, defaultEffortOf, gzipped, FREE_ONLY, PRICE_TTL, keyAccount, remoteConfig, cycleOf, typeUnions, systemAsUser, systemKey, DEFAULT_SYSTEM, EDGE_READS, fitShape, replyAfterTools, AFTER_TOOLS_REFUSED, enterpriseUsageOf, notDesktop, textOnly, runsOutOf, packagesOf, endOf, enterpriseHeaders, enterpriseOf, liveModels, browserSignIn, withSystem, asReasoning, normalizeToolChoice, fitTools, fitted, renamed, unflagged, usageOf, desktopHeld, explained, REFUSED_HINT, RESTRICTED_HINT, EXHAUSTED_HINT, freeCredits, creditsOf, priceOf, fresh, SITES, renewing, renewed, SESSION, attend, turnKey, conversationKey, signatureOf, isMessages, withoutUnsigned, withoutSignedThinking, prepared, answeredBefore, nativeOf, modelOf, configModels, API_MESSAGES: NPM_MESSAGES, API_CHAT: NPM }

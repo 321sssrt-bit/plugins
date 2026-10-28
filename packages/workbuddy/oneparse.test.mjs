@@ -111,3 +111,64 @@ test("the loader parses a long chat once", async () => {
     JSON.parse = realParse
   }
 })
+
+// counted is what the loader parsed and wrote out of chats over 1 MiB,
+// through a plugin with the given magpie options, for each chat sent; the
+// fake answers each chat with answer(text) or OK
+async function counted(bodies, { option = () => false, answer = () => null, auth } = {}) {
+  const realFetch = globalThis.fetch
+  const realParse = JSON.parse
+  const realStringify = JSON.stringify
+  const n = { parses: 0, writes: 0 }
+  JSON.parse = (s, ...a) => {
+    if (typeof s === "string" && s.length > 1 << 20) n.parses++
+    return realParse(s, ...a)
+  }
+  JSON.stringify = (...a) => {
+    const s = realStringify(...a)
+    if (typeof s === "string" && s.length > 1 << 20) n.writes++
+    return s
+  }
+  globalThis.fetch = async (url, init) => {
+    if (String(url).endsWith("/v3/config")) return Response.json({ code: 0, data: { agents: [{ name: "cli", models: ["hy3", "gemini-461"] }], models: [{ id: "hy3", credits: "x0.00" }, { id: "gemini-461", credits: "x0.00" }] } })
+    return answer(unz(init.body)) ?? new Response("data: [DONE]\n\n", { headers: { "content-type": "text/event-stream" } })
+  }
+  const out = []
+  try {
+    const hooks = await WorkBuddyAuthPlugin({ client: { auth: { set: async () => {} } }, magpie: { option } })
+    const loader = await hooks.auth.loader(async () => auth ?? { type: "oauth", access: "test-only", refresh: "test-only", uid: "u", expires: Date.now() + 3600000 })
+    for (const body of bodies) {
+      n.parses = n.writes = 0
+      const res = await loader.fetch("https://copilot.tencent.com/v2/chat/completions", { method: "POST", body, headers: { "content-type": "application/json" } })
+      await res.text()
+      out.push({ status: res.status, ...n })
+    }
+  } finally {
+    globalThis.fetch = realFetch
+    JSON.parse = realParse
+    JSON.stringify = realStringify
+  }
+  return out
+}
+
+const long = (model, extra = {}) =>
+  JSON.stringify({ model, stream: true, messages: [{ role: "system", content: "s" }, { role: "user", content: "x".repeat(2 << 20) }], ...extra })
+
+test("with Free models only on, the model is read off the one parse", async () => {
+  const [r] = await counted([long("hy3")], { option: (_p, k) => k === "free_only", auth: { type: "api", key: "ck_test0000000000abcdefgh" } })
+  expect(r).toEqual({ status: 200, parses: 1, writes: 0 })
+})
+
+test("a model that wants the reply after tools has it put in on the one parse", async () => {
+  const call = { role: "assistant", content: "", tool_calls: [{ id: "c", type: "function", function: { name: "bash", arguments: "{}" } }] }
+  const chat = (n) => JSON.stringify({ model: "gemini-461", messages: [{ role: "user", content: "go" }, call, { role: "tool", tool_call_id: "c", content: "y".repeat(2 << 20) }, { role: "user", content: `now ${n}` }] })
+  // refused unless the reply sits after the tool's result; read without a
+  // parse of its own, which would be counted
+  const answer = (text) =>
+    text.indexOf('{"role":"assistant","content":""}') > text.indexOf('"role":"tool"') ? null : new Response('{"error":{"code":11153}}', { status: 400 })
+  // the first teaches the plugin (refused, sent again with the reply); the
+  // second has it up front: read once, written once
+  const [first, second] = await counted([chat(1), chat(2)], { answer })
+  expect(first.status).toBe(200)
+  expect(second).toEqual({ status: 200, parses: 1, writes: 1 })
+})
