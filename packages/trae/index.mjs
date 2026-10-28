@@ -2740,9 +2740,12 @@ const MAX = "-max"
 // same names, as reasoning_effort, so a level an agent picks is sent as Trae
 // spells it. OpenCode knows the three as low/high/xhigh, so the map goes both
 // ways. Trae's client names two more, medium and max (its bundle's
-// reasoning_effort.{low,medium,high,extra_high,max}), handed out per model:
-// its app offers DeepSeek V4.1 Flash max (#434), so they are spelled here too,
-// and still offered only for a model whose entry names them.
+// reasoning_effort.{low,medium,high,extra_high,max}), handed out per model,
+// so they are spelled here too, and offered only for a model whose entry
+// names them. No list seen yet names either: TRAE CN's app offers DeepSeek
+// V4.1 Flash 轻/高/极高 (light/high/extra_high) alone, and its "Max" is the
+// 更大上下文 (Max) 1M-window switch, which is the model id + MAX below, not a
+// level (#434's screenshot).
 //
 // An entry without the config takes no level: Trae serves it at its own
 // default and nothing is sent. The plugin used to send none for every model,
