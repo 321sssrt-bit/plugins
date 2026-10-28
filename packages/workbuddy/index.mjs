@@ -1336,9 +1336,13 @@ function fitted(body) {
 // copilot.tencent.com against 258 MB down. Measured 2026-10-28 on
 // www.workbuddy.ai: a gzipped chat answers as the plain one does. A
 // Messages request (Claude on the China build) goes as it came: that route
-// wasn't tried gzipped. null when the body isn't sent gzipped.
-function gzipped(native, b) {
-  if (native) return null
+// wasn't tried gzipped. Only a chat completion goes gzipped (isCompletion):
+// WorkBuddy's images API reads its body as plain JSON, and magpie's drawing
+// (/v2/images/generations, /v2/images/edits) is sent through this same
+// fetch; gzipped it answered 400 11101 "invalid character '\x1f'" (iwinux on
+// Discord, 0.1.43). null when the body isn't sent gzipped.
+function gzipped(completion, b) {
+  if (!completion) return null
   if (typeof b === "string") return gzipSync(Buffer.from(b))
   if (b instanceof ArrayBuffer || ArrayBuffer.isView(b)) return gzipSync(b)
   return null
@@ -2174,6 +2178,19 @@ function effortsOf(d, site, id) {
   return EFFORT_ORDER.filter((e) => set.has(e))
 }
 
+// isCompletion is whether a request is a chat completion: one to
+// .../chat/completions, or, with no URL to read, a body holding a chat's
+// messages. Nothing else the loader's fetch sends (magpie's drawings to
+// /v2/images/*) is a chat: it goes neither gzipped nor given an effort.
+function isCompletion(url, chat) {
+  let path = ""
+  try {
+    path = new URL(String(url ?? "")).pathname
+  } catch {}
+  if (path) return /\/chat\/completions$/.test(path)
+  return Array.isArray(chat?.messages)
+}
+
 // defaultEffortOf is the level WorkBuddy's own client asks a model for when
 // the user picked none: its CLI's configureThinkingSettings (WorkBuddy
 // 5.9.3, CLI 2.165.0) takes the session's effort, else the settings', else
@@ -2486,13 +2503,14 @@ function makePlugin(site) {
             // a chat that names no effort is asked at the model's default,
             // as WorkBuddy's client asks it (withDefaultEffort); with no
             // list to read (effortList) the chat goes as it came
-            if (!native && chat && !namesEffort(chat) && withDefaultEffort(chat, await effortList(a))) changed = true
+            const completion = !native && isCompletion(req ? req.url : input, chat)
+            if (completion && chat && !namesEffort(chat) && withDefaultEffort(chat, await effortList(a))) changed = true
             chatHeaders(site, headers)
             attendChat(headers, chat, session)
             const post = (b) => {
               // a chat goes gzipped, as WorkBuddy's client sends it
               // (gzipped); its size on the wire is what unanswered weighs
-              const z = gzipped(native, b)
+              const z = gzipped(completion, b)
               if (z) headers.set("Content-Encoding", "gzip")
               else headers.delete("Content-Encoding")
               return fetch(req ? req.url : input, { ...init, method: init?.method ?? req?.method, headers, body: z ?? b }).catch((e) => unanswered(site, a, z ?? b, e, init?.signal))

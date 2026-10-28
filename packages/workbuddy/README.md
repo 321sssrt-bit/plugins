@@ -244,7 +244,9 @@ client names, `none` too, goes as it came.
 
 A chat goes gzipped (`Content-Encoding: gzip`), as WorkBuddy's own client
 sends its model requests (`RequestBodyGzip` in both builds' product.json).
-Claude's Messages route goes as it came.
+Claude's Messages route goes as it came, and so does anything that isn't a
+chat completion: magpie's drawings (`/v2/images/generations`,
+`/v2/images/edits`) go as plain JSON, which is all the images API reads.
 
 A model's price is its `credits` ("x0.29") and the config's
 `modelPromotions`. A discount for whole days (Step-5-Preview's 独家限免) is
