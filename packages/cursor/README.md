@@ -50,8 +50,11 @@ plugin's `fetch` answers them on Cursor's agent API:
   after it go straight to HTTP/1.1 for 10 minutes; a failed connection
   (refused, no network) or a stream the server refused leaves the next Run
   to try HTTP/2 again. A region error over HTTP/1.1 sends the Run back to
-  HTTP/2 at the region's agent host. A BidiAppend with no answer in 60 s
-  (more for a large one) ends the Run, as cursor-agent does.
+  HTTP/2 at the region's agent host. BidiAppends go up numbered in order,
+  up to 16 at a time as cursor-agent sends them (one at a time for a
+  native session's Run, whose tool results must be certain). A BidiAppend
+  with no answer in 60 s (more for a large one) ends the Run, as
+  cursor-agent does.
 - A new Run imports the whole conversation as AI SDK messages kept as blobs
   the server asks for. The caller's tools are MCP tools, listed in the
   system prompt; the model calls them through Cursor's `CallDynamicTool`,

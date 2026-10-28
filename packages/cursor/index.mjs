@@ -2037,10 +2037,11 @@ async function agentURL(tok, fresh) {
 // had here (h2Blocked), the Runs after it go straight to HTTP/1.1 for
 // H2.retryAfter, or until a region error sends one back (answerOf); a
 // connection that failed (refused, no network) or a stream the server
-// refused leaves the next Run to try HTTP/2 again.
+// refused leaves the next Run to try HTTP/2 again. atOnce is how many
+// BidiAppends openH1 may have on their way at once.
 let h1Until = 0
 const cancelledOpen = () => ({ error: { status: 410, message: "the request was cancelled" }, h2Failed: false })
-async function open(base, headers, signal) {
+async function open(base, headers, signal, atOnce = H1.atOnce) {
   if (signal?.aborted) return cancelledOpen()
   if (Date.now() >= h1Until) {
     const o = await openH2(base, headers, signal)
@@ -2054,7 +2055,7 @@ async function open(base, headers, signal) {
     if (o.blocked) h1Until = Date.now() + H2.retryAfter
   }
   if (signal?.aborted) return cancelledOpen()
-  return openH1(headers, signal)
+  return openH1(headers, signal, atOnce)
 }
 
 const H2 = {
@@ -2121,7 +2122,15 @@ function openH2(base, headers, signal) {
   })
 }
 
-const H1 = { appendWait: 60_000 } // ms a BidiAppend may take before the Run fails, as cursor-agent's appendTimeoutMs
+const H1 = {
+  appendWait: 60_000, // ms a BidiAppend may take before the Run fails, as cursor-agent's appendTimeoutMs
+  // BidiAppends on their way at once, numbered in order, as cursor-agent
+  // keeps them: one at a time, a new Run's history (a blob a message,
+  // hundreds for a long conversation, all asked for at once) took a round
+  // trip to Cursor each before the model could start. A native session's
+  // Run keeps them one at a time (runNative).
+  atOnce: 16,
+}
 
 // connectCode is Connect's code for an HTTP status that came with no
 // Connect error of its own
@@ -2136,7 +2145,7 @@ function connectCode(status) {
 // is a 200 at once; an error Cursor says later, or a call that fails,
 // ends the stream with Connect's end frame, which runOnce reads as the
 // Run's own.
-function openH1(headers, signal) {
+function openH1(headers, signal, atOnce = H1.atOnce) {
   if (signal?.aborted) return Promise.resolve(cancelledOpen())
   const ac = new AbortController()
   const id = headers["x-request-id"]
@@ -2144,15 +2153,23 @@ function openH1(headers, signal) {
   let ended = false
   let seq = 0
   let reader
+  const going = new Set()
   const req = new Duplex({
     read() {},
     write(chunk, _enc, cb) {
       // runOnce writes one whole frame each time
       const msg = Buffer.from(chunk).subarray(5)
       const n = seq++
-      // Keep the write buffered until its append finishes, so callbacks and
-      // drain reflect the pending upload rather than an unbounded promise chain.
-      append(msg, n).then(() => cb(), (e) => cb(e))
+      const p = append(msg, n)
+      going.add(p)
+      const gone = () => going.delete(p)
+      p.then(gone, gone)
+      // Up to atOnce appends go at once; past that the write stays
+      // buffered until one finishes, so callbacks and drain reflect the
+      // pending upload rather than an unbounded promise chain. At one,
+      // a write's callback is its own append answered.
+      if (going.size < atOnce) return cb()
+      Promise.race(going).then(() => cb(), (e) => cb(e))
     },
   })
   const cleanup = () => {
@@ -2179,7 +2196,7 @@ function openH1(headers, signal) {
   }
   // append sends one message up. One that gets no answer by its deadline
   // (more time for a large one) ends the Run, as cursor-agent's
-  // bidi_append_deadline_exceeded does: the messages after it wait on it.
+  // bidi_append_deadline_exceeded does; so does one that fails.
   const append = async (msg, n) => {
     if (ended || ac.signal.aborted) return
     const body = pb().str(1, msg.toString("hex")).bytes(2, pb().str(1, id).done()).varint(3, n).done()
@@ -2415,6 +2432,9 @@ async function runNative({ tok, base, id, tools, conv, convID, signal, maxMode, 
       "x-cursor-agent-allowed-tools": "mcp_tool_call,get_mcp_tools_tool_call",
     },
     native.ac.signal,
+    // one at a time: a native session counts a write as done only when
+    // Cursor answered its own append, so a tool result is never uncertain
+    1,
   )
   if (o.error) {
     native.fail(o.error)

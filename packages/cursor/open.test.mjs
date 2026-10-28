@@ -236,7 +236,7 @@ for (const outcome of ["EOF", "HTTP error", "read error"]) {
   })
 }
 
-test("openH1: write callbacks and drain wait for serialized append response bodies", async () => {
+test("openH1 one at a time (a native session's Run): write callbacks and drain wait for serialized append response bodies", async () => {
   const downstream = body()
   const first = body()
   const seqnos = []
@@ -247,7 +247,7 @@ test("openH1: write callbacks and drain wait for serialized append response bodi
     seqnos.push(seq)
     return new Response(seq === 0 ? first.stream : new Uint8Array(0))
   }
-  const o = keep(await openH1(headers))
+  const o = keep(await openH1(headers, undefined, 1))
   let drained = false
   o.req.once("drain", () => { drained = true })
   expect(o.req.write(frame(Buffer.alloc(128 * 1024)), () => callbacks.push(0))).toBe(false)
@@ -340,7 +340,7 @@ for (const retained of [0, 32]) for (const outcome of ["head abort", "completion
 }
 
 for (const outcome of ["abort", "close"]) {
-  test(`openH1: ${outcome} cancels a pending append and skips buffered writes`, async () => {
+  test(`openH1 one at a time: ${outcome} cancels a pending append and skips buffered writes`, async () => {
     const downstream = body()
     const ac = new AbortController()
     const appends = []
@@ -352,7 +352,7 @@ for (const outcome of ["abort", "close"]) {
         init.signal.addEventListener("abort", () => reject(init.signal.reason), { once: true })
       })
     }
-    const o = keep(await openH1(headers, ac.signal))
+    const o = keep(await openH1(headers, ac.signal, 1))
     o.req.on("error", () => {})
     o.req.write(frame(Buffer.from("pending")), () => callbacks.push(0))
     o.req.write(frame(Buffer.from("buffered")), () => callbacks.push(1))
