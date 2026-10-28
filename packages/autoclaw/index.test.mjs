@@ -188,6 +188,41 @@ test("ZCode's and pi's identity lines are rewritten", () => {
   expect(unflagged("You are Claude Code, Anthropic's official CLI for Claude.")).toBe("You are the Claude Code CLI, Anthropic's official CLI for Claude.")
 })
 
+// #466 (larrylinli): WorkBuddy renders a custom GLM model into ZCode's
+// opening line, and the CN gateway answers 406 for "This conversation is
+// powered by GLM-<version>" in any case. The fixture is the reporter's line
+// byte for byte; each rewritten form was a 200 in the reporter's probes.
+test("WorkBuddy's GLM opening line and CodeBuddy Code's identity line are rewritten", () => {
+  const opening = "This conversation is powered by GLM-5.3 · AutoClaw 国内 (Zhipu)"
+  expect(unflagged(opening)).toBe("This conversation is powered by the GLM-5.3 model · AutoClaw 国内 (Zhipu)")
+  expect(unflagged("This conversation is powered by GLM-4")).toBe("This conversation is powered by the GLM-4 model")
+  expect(unflagged("Intro.\nthis conversation is powered by glm-5.3.")).toBe("Intro.\nThis conversation is powered by the GLM-5.3 model.")
+  expect(unflagged("This conversation is powered by GLM-4.5-Air.")).toBe("This conversation is powered by the GLM-4.5-Air model.")
+  // what the gateway takes stays as written
+  for (const t of [
+    "This conversation is powered by GLM",
+    "This conversation is powered by ChatGLM-5.3",
+    "The conversation is powered by GLM-5.3",
+    "You are powered by GLM-5.3",
+  ]) expect(unflagged(t)).toBe(t)
+
+  expect(unflagged("You are CodeBuddy Code.")).toBe("You are the CodeBuddy Code CLI.")
+  expect(unflagged("you are codebuddy code, a CLI")).toBe("You are the CodeBuddy Code CLI, a CLI")
+  expect(unflagged("You are CodeBuddy, an assistant")).toBe("You are CodeBuddy, an assistant")
+
+  // the same text in, the same text out: a cached prompt prefix stays put
+  expect(unflagged(unflagged(opening))).toBe(unflagged(opening))
+
+  // unflag reaches the opening line in a WorkBuddy system message
+  const messages = [
+    { role: "system", content: `${opening}\n\nYou help the user.` },
+    { role: "user", content: "This conversation is powered by GLM-5.3" },
+  ]
+  expect(unflag(messages)).toBe(true)
+  expect(messages[0].content).toBe("This conversation is powered by the GLM-5.3 model · AutoClaw 国内 (Zhipu)\n\nYou help the user.")
+  expect(messages[1].content).toBe("This conversation is powered by GLM-5.3")
+})
+
 // Claude Code 2.1.30x opens its system prompt with the SDK identity line,
 // not the CLI one. The CN gateway refuses "Claude Agent SDK" in any case,
 // wherever it sits; the bare phrase is matched so "running on" variants and

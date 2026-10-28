@@ -64,6 +64,15 @@ const FLAGGED = [
   [/You are Qwen Code/gi, "You are the Qwen Code agent"],
   [/You are ZCode/gi, "You are the ZCode agent"],
   [/operating inside pi, a coding agent harness/gi, "operating inside the pi coding agent harness"],
+  // ZCode's opening line is "This conversation is powered by GLM-<version>";
+  // the CN gateway refuses that wording with any GLM version, in any case,
+  // anywhere (#466: WorkBuddy renders it for a custom GLM model). A bare
+  // "GLM", "ChatGLM-5.3" or "the GLM-5.3 model" passes. The version stops
+  // before a sentence's closing period.
+  [/This conversation is powered by GLM-([\w-]+(?:\.[\w-]+)*)/gi, "This conversation is powered by the GLM-$1 model"],
+  // WorkBuddy's CLI template still opens "You are CodeBuddy Code." (#466);
+  // "You are CodeBuddy" alone passes.
+  [/You are CodeBuddy Code/gi, "You are the CodeBuddy Code CLI"],
 ];
 
 function unflagged(text) {
