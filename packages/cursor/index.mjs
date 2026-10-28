@@ -2038,10 +2038,11 @@ async function agentURL(tok, fresh) {
 // H2.retryAfter, or until a region error sends one back (answerOf); a
 // connection that failed (refused, no network) or a stream the server
 // refused leaves the next Run to try HTTP/2 again. atOnce is how many
-// BidiAppends openH1 may have on their way at once.
+// BidiAppends openH1 may have on their way at once, overlaps which messages
+// may be among them (openH1).
 let h1Until = 0
 const cancelledOpen = () => ({ error: { status: 410, message: "the request was cancelled" }, h2Failed: false })
-async function open(base, headers, signal, atOnce = H1.atOnce) {
+async function open(base, headers, signal, atOnce = H1.atOnce, overlaps) {
   if (signal?.aborted) return cancelledOpen()
   if (Date.now() >= h1Until) {
     const o = await openH2(base, headers, signal)
@@ -2055,7 +2056,7 @@ async function open(base, headers, signal, atOnce = H1.atOnce) {
     if (o.blocked) h1Until = Date.now() + H2.retryAfter
   }
   if (signal?.aborted) return cancelledOpen()
-  return openH1(headers, signal, atOnce)
+  return openH1(headers, signal, atOnce, overlaps)
 }
 
 const H2 = {
@@ -2128,8 +2129,17 @@ const H1 = {
   // keeps them: one at a time, a new Run's history (a blob a message,
   // hundreds for a long conversation, all asked for at once) took a round
   // trip to Cursor each before the model could start. A native session's
-  // Run keeps them one at a time (runNative).
+  // Run sends only its KV replies that way (kvReply); each of its other
+  // messages waits for every append before it, and goes alone (runNative).
   atOnce: 16,
+}
+
+// kvReply is whether a client message (an AgentClientMessage, unframed) is
+// a KV reply, kv_client_message: a blob Cursor asked for, which nothing
+// else waits on. Cursor asks for a new Run's whole history at once.
+function kvReply(msg) {
+  const b = Buffer.isBuffer(msg) ? msg : Buffer.from(msg ?? EMPTY)
+  return b.length > 0 && b[0] === 0x1a // field 3, length-delimited
 }
 
 // connectCode is Connect's code for an HTTP status that came with no
@@ -2144,8 +2154,11 @@ function connectCode(status) {
 // the stream it reads, Connect's frames as the HTTP/2 Run's. Its response
 // is a 200 at once; an error Cursor says later, or a call that fails,
 // ends the stream with Connect's end frame, which runOnce reads as the
-// Run's own.
-function openH1(headers, signal, atOnce = H1.atOnce) {
+// Run's own. overlaps says of a message whether it may go up while appends
+// before it are on their way (up to atOnce of them); one that may not waits
+// for all of them, goes alone, and its write's callback is its own append
+// answered.
+function openH1(headers, signal, atOnce = H1.atOnce, overlaps = () => true) {
   if (signal?.aborted) return Promise.resolve(cancelledOpen())
   const ac = new AbortController()
   const id = headers["x-request-id"]
@@ -2159,11 +2172,20 @@ function openH1(headers, signal, atOnce = H1.atOnce) {
     write(chunk, _enc, cb) {
       // runOnce writes one whole frame each time
       const msg = Buffer.from(chunk).subarray(5)
-      const n = seq++
-      const p = append(msg, n)
-      going.add(p)
-      const gone = () => going.delete(p)
-      p.then(gone, gone)
+      const go = () => {
+        const p = append(msg, seq++)
+        going.add(p)
+        const gone = () => going.delete(p)
+        p.then(gone, gone)
+        return p
+      }
+      if (!overlaps(msg)) {
+        // alone: after every append before it is answered, and answered
+        // itself before the next write
+        Promise.allSettled([...going]).then(go).then(() => cb(), (e) => cb(e))
+        return
+      }
+      go()
       // Up to atOnce appends go at once; past that the write stays
       // buffered until one finishes, so callbacks and drain reflect the
       // pending upload rather than an unbounded promise chain. At one,
@@ -2432,9 +2454,15 @@ async function runNative({ tok, base, id, tools, conv, convID, signal, maxMode, 
       "x-cursor-agent-allowed-tools": "mcp_tool_call,get_mcp_tools_tool_call",
     },
     native.ac.signal,
-    // one at a time: a native session counts a write as done only when
-    // Cursor answered its own append, so a tool result is never uncertain
-    1,
+    // Over HTTP/1.1 the history's blobs go up H1.atOnce at a time, as
+    // cursor-agent sends them; one at a time, a Run with a long history
+    // waited a round trip to api2 a blob before its first token (ysm119 on
+    // Discord: 135 blobs, 37 s against 3 s over HTTP/2). Everything else
+    // goes alone, after the appends before it were answered, and counts as
+    // written only once Cursor answered it, so a tool result is never
+    // uncertain.
+    H1.atOnce,
+    kvReply,
   )
   if (o.error) {
     native.fail(o.error)
@@ -3167,4 +3195,4 @@ export async function CursorAuthPlugin() {
 }
 
 // for tests
-export const _internal = { listFor, lists, keychain, keychainToken, nativeTransport, onDemandOf,resetH1: () => (h1Until = 0), onH1: () => Date.now() < h1Until, resetTeam: () => { teamRead.at = 0; teamRead.info = null }, expireTeam: () => (teamRead.at = 0),H2, H1, h2Blocked, open, openH1, openH2, STEP_WAIT, stepUsage, usageKey, ledger, owed, flights, misses, unreadable, catalog, usable, request, modelsOf, tokensOf, maxRequired, conversationID, usageOf, sessionOf, SESSION, errorResponse, kept, poolBase, conversation, buildRun, decode, exec, fields, pb, pbValue, pbAny, frame, frames, failure, toolsOf, expiry }
+export const _internal = { kvReply, listFor, lists, keychain, keychainToken, nativeTransport, onDemandOf,resetH1: () => (h1Until = 0), onH1: () => Date.now() < h1Until, resetTeam: () => { teamRead.at = 0; teamRead.info = null }, expireTeam: () => (teamRead.at = 0),H2, H1, h2Blocked, open, openH1, openH2, STEP_WAIT, stepUsage, usageKey, ledger, owed, flights, misses, unreadable, catalog, usable, request, modelsOf, tokensOf, maxRequired, conversationID, usageOf, sessionOf, SESSION, errorResponse, kept, poolBase, conversation, buildRun, decode, exec, fields, pb, pbValue, pbAny, frame, frames, failure, toolsOf, expiry }
