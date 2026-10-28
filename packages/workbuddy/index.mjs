@@ -608,8 +608,13 @@ function isMessages(url, body) {
 // unsigned thinking is body itself, byte for byte.
 function withoutUnsigned(body) {
   const b = chatOf(body)
+  return unsignedOn(b) ? JSON.stringify(b) : body
+}
+
+// unsignedOn makes withoutUnsigned's change to a body's object; true when it made one
+function unsignedOn(b) {
   const msgs = b?.messages
-  if (!Array.isArray(msgs)) return body
+  if (!Array.isArray(msgs)) return false
   let changed = false
   for (const m of msgs) {
     if (m?.role !== "assistant" || !Array.isArray(m.content)) continue
@@ -618,7 +623,7 @@ function withoutUnsigned(body) {
     changed = true
     m.content = kept.length ? kept : [{ type: "text", text: "" }]
   }
-  return changed ? JSON.stringify(b) : body
+  return changed
 }
 
 // withoutSignedThinking is a Messages body without any thinking block at
@@ -674,7 +679,10 @@ function sessionOf(headers) {
 // already there — the caller's own, or another plugin's — is kept, and the
 // message and request ids are the same one, as WorkBuddy's client has them.
 function attend(headers, body, session) {
-  const chat = chatOf(body)
+  attendChat(headers, chatOf(body), session)
+}
+
+function attendChat(headers, chat, session) {
   const conv = conversationKey(chat, session)
   const msg = hex()
   headers.set("X-Conversation-Message-ID", msg)
@@ -792,27 +800,32 @@ function withSystem(body) {
   if (typeof body !== "string") return body
   try {
     const b = JSON.parse(body)
-    if (!Array.isArray(b?.messages) || !b.messages.length) return body
-    let changed = unflag(b.messages)
-    if (b.max_completion_tokens !== undefined) {
-      if (b.max_tokens === undefined) b.max_tokens = b.max_completion_tokens
-      delete b.max_completion_tokens
-      changed = true
-    }
-    for (const m of b.messages) {
-      if (m?.role !== "developer") continue
-      m.role = "system"
-      changed = true
-    }
-    if (asReasoning(b.messages)) changed = true
-    if (b.messages[0]?.role !== "system") {
-      b.messages.unshift({ role: "system", content: "You are a helpful assistant." })
-      changed = true
-    }
-    return changed ? JSON.stringify(b) : body
+    return systemOn(b) ? JSON.stringify(b) : body
   } catch {
     return body
   }
+}
+
+// systemOn makes withSystem's changes to a chat's object; true when it made any
+function systemOn(b) {
+  if (!Array.isArray(b?.messages) || !b.messages.length) return false
+  let changed = unflag(b.messages)
+  if (b.max_completion_tokens !== undefined) {
+    if (b.max_tokens === undefined) b.max_tokens = b.max_completion_tokens
+    delete b.max_completion_tokens
+    changed = true
+  }
+  for (const m of b.messages) {
+    if (m?.role !== "developer") continue
+    m.role = "system"
+    changed = true
+  }
+  if (asReasoning(b.messages)) changed = true
+  if (b.messages[0]?.role !== "system") {
+    b.messages.unshift({ role: "system", content: "You are a helpful assistant." })
+    changed = true
+  }
+  return changed
 }
 
 // WorkBuddy's channel check reads the system and assistant messages only:
@@ -841,7 +854,11 @@ function textOf(content) {
 // systemKey is the text of a chat's system messages, which a chat refused
 // once is known by: the same agent's next chat goes with systemAsUser at once
 function systemKey(body) {
-  const msgs = chatOf(body)?.messages
+  return systemKeyOf(chatOf(body))
+}
+
+function systemKeyOf(chat) {
+  const msgs = chat?.messages
   if (!Array.isArray(msgs)) return ""
   const key = msgs.filter((m) => m?.role === "system").map((m) => textOf(m.content)).join("\n")
   return key.trim() === DEFAULT_SYSTEM ? "" : key
@@ -849,15 +866,21 @@ function systemKey(body) {
 
 function systemAsUser(body) {
   const b = chatOf(body)
+  return systemAsUserOn(b) ? JSON.stringify(b) : null
+}
+
+// systemAsUserOn makes systemAsUser's move on a chat's object; false when
+// there's nothing to move
+function systemAsUserOn(b) {
   const msgs = b?.messages
-  if (!Array.isArray(msgs)) return null
+  if (!Array.isArray(msgs)) return false
   let i = 0
   const lead = []
   for (; i < msgs.length && msgs[i]?.role === "system"; i++) lead.push(textOf(msgs[i].content))
   const said = lead.join("\n\n").trim()
   const rest = msgs.slice(i).map((m) => (m?.role === "system" ? { ...m, role: "user" } : m))
   const moved = said && said !== DEFAULT_SYSTEM
-  if (!moved && rest.every((m, k) => m === msgs[i + k])) return null
+  if (!moved && rest.every((m, k) => m === msgs[i + k])) return false
   if (moved) {
     const text = INSTRUCTIONS[0] + said + INSTRUCTIONS[1]
     const u = rest.findIndex((m) => m?.role === "user")
@@ -867,7 +890,7 @@ function systemAsUser(body) {
     else rest[u] = { ...rest[u], content: text }
   }
   b.messages = [{ role: "system", content: DEFAULT_SYSTEM }, ...rest]
-  return JSON.stringify(b)
+  return true
 }
 
 // normalizeToolChoice converts the object form emitted by OpenAI clients to
@@ -877,40 +900,45 @@ function normalizeToolChoice(body) {
   if (typeof body !== "string") return body
   try {
     const b = JSON.parse(body)
-    if (!b || typeof b !== "object" || Array.isArray(b) || !("tool_choice" in b)) return body
-    const choice = b.tool_choice
-    if (typeof choice === "string") {
-      if (choice.trim().toLowerCase() === "none") {
-        delete b.tool_choice
-        delete b.tools
-        delete b.functions
-      }
-      return JSON.stringify(b)
-    }
-    if (!choice || typeof choice !== "object" || Array.isArray(choice)) {
-      delete b.tool_choice
-      return JSON.stringify(b)
-    }
-    const type = typeof choice.type === "string" ? choice.type.trim().toLowerCase() : ""
-    if (type === "none") {
-      delete b.tool_choice
-      delete b.tools
-      delete b.functions
-    } else if (type === "auto" || type === "required") {
-      b.tool_choice = type
-    } else if (type === "function") {
-      const fn = choice.function && typeof choice.function === "object" && !Array.isArray(choice.function)
-        ? choice.function
-        : undefined
-      const name = typeof fn?.name === "string" ? fn.name.trim() : ""
-      b.tool_choice = name || "auto"
-    } else {
-      delete b.tool_choice
-    }
-    return JSON.stringify(b)
+    return toolChoiceOn(b) ? JSON.stringify(b) : body
   } catch {
     return body
   }
+}
+
+// toolChoiceOn makes normalizeToolChoice's change to a chat's object; true
+// when it made one (a string choice other than none is WorkBuddy's already)
+function toolChoiceOn(b) {
+  if (!b || typeof b !== "object" || Array.isArray(b) || !("tool_choice" in b)) return false
+  const choice = b.tool_choice
+  if (typeof choice === "string") {
+    if (choice.trim().toLowerCase() !== "none") return false
+    delete b.tool_choice
+    delete b.tools
+    delete b.functions
+    return true
+  }
+  if (!choice || typeof choice !== "object" || Array.isArray(choice)) {
+    delete b.tool_choice
+    return true
+  }
+  const type = typeof choice.type === "string" ? choice.type.trim().toLowerCase() : ""
+  if (type === "none") {
+    delete b.tool_choice
+    delete b.tools
+    delete b.functions
+  } else if (type === "auto" || type === "required") {
+    b.tool_choice = type
+  } else if (type === "function") {
+    const fn = choice.function && typeof choice.function === "object" && !Array.isArray(choice.function)
+      ? choice.function
+      : undefined
+    const name = typeof fn?.name === "string" ? fn.name.trim() : ""
+    b.tool_choice = name || "auto"
+  } else {
+    delete b.tool_choice
+  }
+  return true
 }
 
 // ---- tools WorkBuddy takes ----------------------------------------------------
@@ -1258,6 +1286,40 @@ function fitted(body) {
     return { body: changed ? JSON.stringify(b) : body, names }
   } catch {
     return { body, names: new Map() }
+  }
+}
+
+// prepared is a request's body read once for every change the loader makes
+// to it and everything it reads off it (plugins#461): a long chat, 45 MiB
+// of history, was parsed six times on its way, once by each step, and
+// written out again whole by normalizeToolChoice even when nothing changed.
+// chat is the parsed body, changed whether any step changed it; the caller
+// writes it out once, when it did. Each step is the one its own function
+// above makes, in the same order.
+function prepared(body, native) {
+  if (!native && (body instanceof ArrayBuffer || ArrayBuffer.isView(body))) body = new TextDecoder().decode(body)
+  const none = { body, chat: null, names: new Map(), changed: false }
+  if (typeof body !== "string") return none
+  let chat
+  try {
+    chat = JSON.parse(body)
+  } catch {
+    return none
+  }
+  if (chat === null || typeof chat !== "object") return none
+  if (native) return { body, chat, names: new Map(), changed: unsignedOn(chat) }
+  try {
+    let changed = systemOn(chat)
+    const fit = fitTools(chat)
+    if (fit.changed) changed = true
+    if (toolChoiceOn(chat)) changed = true
+    return { body, chat, names: fit.names, changed }
+  } catch {
+    // a shape a step can't take: the steps one by one, each keeping the
+    // body as it was when it can't, as they always have
+    const fit = fitted(withSystem(body))
+    const out = normalizeToolChoice(fit.body)
+    return { body: out, chat: chatOf(out), names: fit.names, changed: false }
   }
 }
 
@@ -2302,16 +2364,13 @@ function makePlugin(site) {
             // /v1/messages, where a chat is refused 11128.
             const native = isMessages(req ? req.url : String(input), body)
             let names = {}
-            if (!native) {
-              body = withSystem(body)
-              const fit = fitted(body)
-              body = normalizeToolChoice(fit.body)
-              names = fit.names
-            } else {
-              body = withoutUnsigned(body)
-            }
+            const p = prepared(body, native)
+            let chat = p.chat
+            let changed = p.changed
+            body = p.body
+            if (!native) names = p.names
             chatHeaders(site, headers)
-            attend(headers, body, session)
+            attendChat(headers, chat, session)
             const post = (b) =>
               fetch(req ? req.url : input, { ...init, method: init?.method ?? req?.method, headers, body: b }).catch((e) => unanswered(site, a, b, e, init?.signal))
             // a 401 is answered once, on whichever try meets it: by a
@@ -2358,11 +2417,13 @@ function makePlugin(site) {
             }
             // a model known to turn tool results then the user's message away
             // gets the empty reply between them up front (see endsAfterTools)
-            const model = chatOf(body)?.model
+            const model = chat?.model
             // a system prompt WorkBuddy refused before goes as the user's
             // words at once (see systemAsUser)
-            const sysKey = native ? "" : systemKey(body)
-            if (sysKey && refusedSystems.has(sysKey)) body = systemAsUser(body) ?? body
+            const sysKey = native ? "" : systemKeyOf(chat)
+            if (sysKey && refusedSystems.has(sysKey) && systemAsUserOn(chat)) changed = true
+            if (changed) body = JSON.stringify(chat)
+            chat = null
             const shaped = (b) => (!native && endsAfterTools.has(model) ? replyAfterTools(b) ?? b : b)
             let res = await send(shaped(body))
             // a signature WorkBuddy's own signing didn't make — a session
@@ -2592,4 +2653,4 @@ export const WorkBuddyAuthPlugin = makePlugin(SITES.workbuddy)
 export const WorkBuddyAIAuthPlugin = makePlugin(SITES["workbuddy-ai"])
 
 // for tests
-export const _internal = { FREE_ONLY, PRICE_TTL, keyAccount, remoteConfig, cycleOf, typeUnions, systemAsUser, systemKey, DEFAULT_SYSTEM, EDGE_READS, fitShape, replyAfterTools, AFTER_TOOLS_REFUSED, enterpriseUsageOf, notDesktop, textOnly, runsOutOf, packagesOf, endOf, enterpriseHeaders, enterpriseOf, liveModels, browserSignIn, withSystem, asReasoning, normalizeToolChoice, fitTools, fitted, renamed, unflagged, usageOf, desktopHeld, explained, REFUSED_HINT, RESTRICTED_HINT, EXHAUSTED_HINT, freeCredits, creditsOf, priceOf, fresh, SITES, renewing, renewed, SESSION, attend, turnKey, conversationKey, signatureOf, isMessages, withoutUnsigned, withoutSignedThinking, answeredBefore, nativeOf, modelOf, configModels, API_MESSAGES: NPM_MESSAGES, API_CHAT: NPM }
+export const _internal = { FREE_ONLY, PRICE_TTL, keyAccount, remoteConfig, cycleOf, typeUnions, systemAsUser, systemKey, DEFAULT_SYSTEM, EDGE_READS, fitShape, replyAfterTools, AFTER_TOOLS_REFUSED, enterpriseUsageOf, notDesktop, textOnly, runsOutOf, packagesOf, endOf, enterpriseHeaders, enterpriseOf, liveModels, browserSignIn, withSystem, asReasoning, normalizeToolChoice, fitTools, fitted, renamed, unflagged, usageOf, desktopHeld, explained, REFUSED_HINT, RESTRICTED_HINT, EXHAUSTED_HINT, freeCredits, creditsOf, priceOf, fresh, SITES, renewing, renewed, SESSION, attend, turnKey, conversationKey, signatureOf, isMessages, withoutUnsigned, withoutSignedThinking, prepared, answeredBefore, nativeOf, modelOf, configModels, API_MESSAGES: NPM_MESSAGES, API_CHAT: NPM }
