@@ -134,6 +134,13 @@ agent's `POST https://trae-api-cn.mchost.guru/api/agent/v3/llm_utils_chat`:
     error (plugins#38). Trae takes no two messages of one role in a row,
     so an assistant turn's text is folded into the calls turn after it
     and consecutive calls turns join one `tool_calls` list.
+  - For a Kimi (Moonshot) model the tools' schemas are first rewritten for
+    Moonshot's "moonshot flavored json schema", which Trae's 4027 "tool call
+    failed" quotes when it refuses them: an `enum` or `const` with no `type`
+    gets the one its values have, a `$ref` beside a `type` and a `type` beside
+    an `anyOf` are written as Kimi holds them (the same rules as kimi-work's).
+    The request's own tools are not changed, and a schema Kimi takes as it is
+    goes byte for byte. Other models' tools go as they are.
   - A call with no name is dropped, and the `tool` result answering it
     with it: Trae requires the name, and an empty `tool_calls` list with a
     result naming no call is not a turn it takes.
