@@ -18,7 +18,8 @@
  */
 
 import { createHash, randomBytes } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { Buffer } from "node:buffer";
 import * as http from "node:http";
 
@@ -429,6 +430,89 @@ function tokenFields(data, fallbackRefresh) {
 // ---------------------------------------------------------------------------
 // 签到与积分
 // ---------------------------------------------------------------------------
+
+// 上游没有积分流水/用量接口（wallets.v2 只有余额，task-list 只有签到），
+// 「已用」只能用本地余额差值算：每次 usage() 观察一次余额，记下本轮峰值，
+// 峰值 − 当前 = 本轮已消耗；任何上涨（相对上次余额，含从 0 回升——池子花光
+// 后签到恰恰最常见）都开新一轮，峰值即当前、used 归零。
+// 状态放 magpie 的配置目录（~/.config/magpie 或 $XDG_CONFIG_HOME/magpie，跟
+// codearts 的台账一个思路）：插件更新不会删掉它，CI 的 HOME=$(mktemp -d) 也
+// 自然隔离；AUTOCLAW_USAGE_STATE_FILE 可改址。写入走临时文件 + rename，并发
+// 写不会留下半份文件；30 天没动的条目顺手清走（没 uid 的账号键是 refresh
+// 哈希，token 一刷新就换键，旧条目靠这个兜底）。北京日界另记当日 −消耗/+入账。
+let usageStatePath;
+function usageStatePathDefault() {
+  if (process.env.AUTOCLAW_USAGE_STATE_FILE) return process.env.AUTOCLAW_USAGE_STATE_FILE;
+  const cfgDir = process.env.XDG_CONFIG_HOME
+    ? `${process.env.XDG_CONFIG_HOME}/magpie`
+    : `${process.env.HOME ?? ""}/.config/magpie`;
+  return `${cfgDir}/autoclaw-usage.json`;
+}
+let usageState;
+/** 测试注入：指向临时目录，并丢掉内存缓存，测试之间互不沿用。 */
+function setUsageStatePath(p) {
+  usageStatePath = p;
+  usageState = undefined;
+}
+function usageStateLoad() {
+  if (usageState) return usageState;
+  try {
+    usageState = JSON.parse(readFileSync(usageStatePath ?? usageStatePathDefault(), "utf8"));
+    if (!usageState || typeof usageState !== "object" || typeof usageState.accts !== "object") usageState = { accts: {} };
+  } catch {
+    usageState = { accts: {} };
+  }
+  return usageState;
+}
+const USAGE_STATE_TTL_MS = 30 * 86400 * 1000;
+function usageStateSave() {
+  try {
+    const now = Date.now();
+    for (const [k, v] of Object.entries(usageState.accts)) {
+      const at = Date.parse(v?.at ?? "");
+      if (!Number.isFinite(at) || now - at > USAGE_STATE_TTL_MS) delete usageState.accts[k];
+    }
+    const path = usageStatePath ?? usageStatePathDefault();
+    mkdirSync(dirname(path), { recursive: true });
+    const tmp = `${path}.${process.pid}.tmp`;
+    writeFileSync(tmp, JSON.stringify(usageState), { mode: 0o600 });
+    renameSync(tmp, path);
+  } catch {}
+}
+/** 北京日期（UTC+8）的 YYYY-MM-DD，签到/每日赠送的日界。 */
+function beijingDayOf(d = new Date()) {
+  return new Date(d.getTime() + 8 * 3600 * 1000).toISOString().slice(0, 10);
+}
+/**
+ * 记一次余额观察，返回 { peak, used, daySpent, dayGained }。
+ * 任何上涨（total > 上次余额，含从 0 回升）都开新一轮：峰值即当前，used 归零——
+ * 不等涨过旧峰值（签到常在花费之后到），也不把 0 当「没见过」（池子花光再签到
+ * 恰恰是最常见的循环）。
+ * daySpent/dayGained：北京当日观察到的 −消耗/+入账 累计。
+ */
+function balanceObserve(key, total) {
+  const st = usageStateLoad();
+  const day = beijingDayOf();
+  const prev = st.accts[key] ?? {};
+  const last = Number(prev.balance);
+  const sameDay = prev.day === day;
+  let daySpent = sameDay ? Number(prev.daySpent) || 0 : 0;
+  let dayGained = sameDay ? Number(prev.dayGained) || 0 : 0;
+  let peak;
+  if (Number.isFinite(last) && total > last) {
+    // 上涨：开新一轮（README 承诺的「余额上涨即新一轮开始」）
+    dayGained += total - last;
+    peak = total;
+  } else {
+    peak = Number(prev.peak);
+    if (!Number.isFinite(peak) || peak <= 0 || total > peak) peak = total;
+    if (Number.isFinite(last) && total < last) daySpent += last - total;
+  }
+  const used = Math.max(0, peak - total);
+  st.accts[key] = { peak, balance: total, day, daySpent, dayGained, at: new Date().toISOString() };
+  usageStateSave();
+  return { peak, used, daySpent, dayGained };
+}
 
 async function fetchWallets(accessToken, hosts) {
   for (const host of dedupe(hosts)) {
@@ -842,8 +926,13 @@ function makeAutoclawPlugin({ providerId, providerName, homeHost, loginMethod })
             ? signin
             : (await signinStatus(token, hosts[0]).then((s) => s ?? signinStatus(token, hosts[1] ?? hosts[0])) ?? signin);
           if (!data) return { error: "积分接口无数据（token 可能不属于该 host）", windows: [] };
-          const total = Number(data.total_balance);
-          if (!Number.isFinite(total)) return { error: "积分响应异常", windows: [] };
+          // total_balance 为 null/空串/非数时按「未知」处理，不记账：Number(null)===0
+          // 会把账号记成整池花光（used 100%），路由也会把它当成已耗尽。
+          const raw = data.total_balance;
+          if (raw == null || raw === "" || !Number.isFinite(Number(raw))) {
+            return { error: "积分响应异常", windows: [] };
+          }
+          const total = Number(raw);
 
           const rows = Array.isArray(data.wallets) ? data.wallets : [];
           const named = rows
@@ -860,10 +949,37 @@ function makeAutoclawPlugin({ providerId, providerName, homeHost, loginMethod })
                 used: 0,
                 display: signinFinal.status === "completed"
                   ? `今日已签 ✓${signinFinal.reward ? ` +${signinFinal.reward}` : ""}`
-                  : `今日未签（+${signinFinal.reward || 400}）`,
+                  : `今日未签（+${signinFinal.reward || 200}）`,
                 aside: true,
               }]
             : [];
+
+          // 本轮消耗窗口：上游没有用量/流水接口，用本地余额差值算
+          // （峰值 − 当前；任何上涨即新一轮）。首日只有一次观察时不出这行。
+          // 键复用 signinAccountKey（#254）：显示名可以重复，没 uid 的旧账号按
+          // refresh token 哈希，同名的两个账号不能共用一本账。
+          const track = balanceObserve(signinAccountKey(providerId, auth), total);
+          // 预付余额窗口（magpie ≥ v0.1.1790，#3950）：balance 是「还剩多少」的
+          // 一等读数，路由按它认识账号、不发明百分比——池子大的排前、花光的
+          // 垫底；旧宿主不认识这个字段，账号维持原状（未知），无副作用。
+          const windows = [...signinWindow, { name: "积分余额", balance: total, unit: "积分" }];
+          if (track.used > 0) {
+            const pct = track.peak > 0 ? Math.min(100, Math.round((track.used / track.peak) * 1000) / 10) : 0;
+            windows.unshift({
+              name: "本轮消耗",
+              // aside：只展示，不参与路由。这个百分比是「自上次上涨以来花掉的比例」，
+              // 不是「池子还剩多少」——路由的池子比较交给上面的 balance 窗口。
+              aside: true,
+              // used/remaining 是 0–100 的百分比；amount/limit 是原始积分
+              used: pct,
+              remaining: Math.max(0, 100 - pct),
+              amount: Math.round(track.used),
+              limit: Math.round(track.peak),
+              display: `${Math.round(track.used)} / ${Math.round(track.peak)} 积分`
+                + (track.daySpent > 0 ? ` · 今日 -${Math.round(track.daySpent)}` : "")
+                + (track.dayGained > 0 ? ` · +${Math.round(track.dayGained)}` : ""),
+            });
+          }
 
           // 积分是纯余额，没有总量也没有已用量：只放在 balance 里。做成
           // used: 0 的窗口，卡片会给它配上「剩余 100%」（#376）。细分钱包
@@ -871,7 +987,7 @@ function makeAutoclawPlugin({ providerId, providerName, homeHost, loginMethod })
           const parts = named.map((w) => `${w.name} ${Math.round(w.balance)}`);
           return {
             balance: `${Math.round(total)} 积分${parts.length ? `（${parts.join(" · ")}）` : ""}`,
-            windows: signinWindow,
+            windows,
           };
         } catch (e) {
           if (e?.banned) return { error: e.message, signIn: "kept", windows: [] };
@@ -1393,6 +1509,7 @@ export const _internal = {
   makePluginForTest: makeAutoclawPlugin,
   platformTm, md5Hex, jwtClaim, tokenFields, codeValue, bizHeaders, bareToken, newDeviceId,
   dailySignin, signinStatus, maybeSignin, signinAccountKey, signinConfig, checkinOutcome, refreshTokens,
+  balanceObserve, usageStatePath: () => usageStatePath ?? usageStatePathDefault(), setUsageStatePath, beijingDayOf,
   fetchUserProfile, accountDeviceId, accountDisplayName, startLocalOAuth,
   FLAGGED, unflagged, unflag, tidyBody, rewriteManagedBody, autoclawRewriteBody, explained, OFFICIAL_SYSTEM_PROMPT, REFUSED_HINT,
   guidePageHtml, callbackPageHtml,

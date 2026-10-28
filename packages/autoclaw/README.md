@@ -35,7 +35,20 @@ OpenCode 同样可加载（`opencode auth login`）。登录信息保存在 magp
 
 - 对话走 `POST {host}/autoclaw-proxy/proxy/autoclaw/v1/chat/completions`（`X-Authorization` 鉴权）；
 - token 过期前自动轮换（refresh token 一次一换，`auth.refresh` 钩子交给 magpie 串行化，不会双花）；
-- 积分余额通过 `auth.usage` 的 `balance` 显示（纯积分制，无总量上限，不做成额度窗口，细分钱包写在括号里）；
+- 积分余额通过 `auth.usage` 的 `balance` 显示（纯积分制，无总量上限，细分钱包写在括号里），
+  同时作为预付钱包窗口 `{ name: "积分余额", balance, unit: "积分" }` 上报（magpie ≥ v0.1.1790，
+  #3950）：路由按真实余额认识和排位账号，不发明百分比，余额 0 算用完；更早的 magpie
+  不认识 `balance`，账号维持原状。
+  上游没有积分流水/用量接口（wallets.v2 只有余额），「本轮消耗」窗口**由本地余额差值算**：
+  每次 `usage()` 记下本轮峰值，`峰值 − 当前 = 本轮已消耗`，**任何上涨**（相对上次
+  观察到的余额，含从 0 回升——每日签到、礼包、兑换）都开新一轮，不等涨过旧峰值（签到常在花费
+  之后到）。因为每天签到都会开新一轮，「本轮」≈「自今天签到以来」。这个窗口带
+  `aside: true`，只展示、不参与路由：它的百分比是「自上次上涨以来花掉的比例」，不是池子剩余。
+  `total_balance` 为 null/空串/非数时按未知处理（「积分响应异常」），不记账。
+  状态按账号（键复用 `signinAccountKey`，#254：uid，没 uid 按 refresh token 哈希）存在
+  `$XDG_CONFIG_HOME/magpie/autoclaw-usage.json`（或 `~/.config/magpie/`，`AUTOCLAW_USAGE_STATE_FILE`
+  可改址），临时文件 + rename 写入，30 天没动的条目清走；插件更新不会丢。
+  测试可用 `_internal.setUsageStatePath` 把状态文件指到临时目录。
 - **国际版登录是完整本地实现**：插件在 127.0.0.1 上取官方 TokenServer 端口池中的一个端口
   （18432/19654/19723/53699，OAuth client 回调白名单；被占自动顺延）起临时服务器，内嵌引导页完成
   阿里滑块验证（`AliyunCaptcha` SDK，`ali_captcha_verify_param` 回执）→ 获取授权页 →
