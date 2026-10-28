@@ -390,6 +390,19 @@ Qoder CN's `runtime-info` for environment `0` (the international one is
 - `<openapi>` is `openapi.qoder.sh` (Qoder) or `openapi.qoder.com.cn`
   (Qoder CN). Other pages on those hosts are still refused.
 
+**When it is asked (0.2.43).** The daily 100 credits are a campaign of
+their own each day, listed from 10:00 (UTC+8) to 09:59 the next day
+(`startAt`/`endAt`; the campaign's own text says "Daily reset: 10:00
+(UTC+8)", a live list on 2026-10-28). A check-in before 10:00 meets the day
+before's campaign: it claims that one if it is still open. Every answer
+that knows the window carries `until`, the next campaign's opening (a day
+after this one's start, or its end when it runs longer) plus a minute, and
+magpie (with `until` support) asks again then, so today's credits are
+claimed a minute or two after 10:00 (UTC+8), whatever the computer's time
+zone, with nothing to set. Between the old campaign's end at 09:59 and
+10:00 the check-in is `failed` with `until` 10:01. An older magpie ignores
+`until` and asks once a Beijing calendar day, as before.
+
 Taken from [wallechfox/qoder-checkin](https://github.com/wallechfox/qoder-checkin),
 which a user reports works, and Qoder desktop 0.4.3's campaign requests.
 International campaign discovery was checked with a real account on

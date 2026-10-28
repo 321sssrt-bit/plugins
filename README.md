@@ -215,10 +215,12 @@ Each package is a folder under `packages/<name>/`:
     `checkin(getAuth, provider)`. magpie calls it once a day for each
     signed-in account while the user has it on (Settings → Usage →
     Plugins), and shows what came of it on the account's Usage card. It
-    returns `{ outcome, credit?, streak?, message? }`, `outcome` being
+    returns `{ outcome, credit?, streak?, message?, until? }`, `outcome` being
     `claimed` (checked in now), `done` (already today), `ineligible`,
     `inactive` (no check-in event now), `captcha` or `failed`; a throw is
     `failed` with its message, and only `failed` is tried again that day.
+    `until` (RFC 3339) is when the vendor's own day turns, if not at
+    Beijing midnight: magpie asks again then (Qoder's opens at 10:00 UTC+8).
     Never solve a captcha: return `captcha` and the user checks in in the
     vendor's app. Needs magpie with the hook (after v0.1.1083);
     [the contract](https://github.com/yetone/magpie/blob/main/docs/subsystems/provider-plugins.md#a-plugins-daily-check-in).

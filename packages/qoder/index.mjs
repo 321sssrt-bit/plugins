@@ -2089,6 +2089,36 @@ function gfmt(n) {
 
 const RFC3339 = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d+)?(Z|[+-]\d\d:\d\d)$/i
 
+// Qoder's daily credits are a campaign of their own each day, listed from
+// 10:00 (UTC+8) to 09:59 the next day: its startAt and endAt, and its own
+// words, "Daily reset: 10:00 (UTC+8)" (a live list, 2026-10-28; sdytman on
+// Discord: qoder每天10点开始签到). So the check-in's day is the campaign's,
+// not the calendar's in any zone: a check-in before 10:00 meets the day
+// before's campaign, and the next one opens a day after that one's start,
+// a minute after its end. A check-in says when (until, RFC 3339), and
+// magpie asks again then, whatever the machine's time zone.
+const DAY_MS = 86_400_000
+// a minute's room for a computer clock that runs ahead of Qoder's
+const OPEN_ROOM_MS = 60_000
+
+// at is a time Qoder gives, in seconds or milliseconds, as milliseconds.
+const at = (v) => {
+  const n = Number(v)
+  if (v === null || v === undefined || v === "" || !Number.isFinite(n) || n <= 0) return undefined
+  return n > 1e12 ? n : n * 1000
+}
+
+// nextOpens is when the campaign after c is expected to open: a day after
+// c's start, or c's end when it runs longer than a day.
+const nextOpens = (c) => {
+  const start = at(c?.startAt), end = at(c?.endAt)
+  if (end === undefined) return undefined
+  return start === undefined ? end : Math.max(end, start + DAY_MS)
+}
+
+// askAgain is a check-in's until: when to ask again, with room.
+const askAgain = (t) => (Number.isFinite(t) ? { until: new Date(t + OPEN_ROOM_MS).toISOString() } : {})
+
 // when is a time Qoder gives: an RFC 3339 string, else seconds or
 // milliseconds, as a number or its text.
 function when(v) {
@@ -2586,16 +2616,21 @@ const makePlugin = (site) => async ({ client }) => {
       }
       if (listRes.status !== 200) return { outcome: "failed", message: `campaigns: HTTP ${listRes.status}` }
       const now = Date.now()
-      const active = (c) => (!c.startAt || c.startAt * 1000 <= now) && (!c.endAt || c.endAt * 1000 > now)
+      const active = (c) => (at(c.startAt) ?? -Infinity) <= now && now < (at(c.endAt) ?? Infinity)
       const campaigns = (Array.isArray(list.campaigns) ? list.campaigns : []).filter((x) => x?.actionType === "CLAIM_BENEFIT")
       const campaign = campaigns.find((x) => x.claimStatus === "CLAIMABLE")
       if (!campaign) {
         const done = campaigns.find((x) => x.claimStatus === "CLAIMED" && active(x))
         if (done) {
           const amount = Number(done.benefit?.amount)
-          return { outcome: "done", ...(Number.isFinite(amount) && amount > 0 ? { credit: amount } : {}) }
+          return { outcome: "done", ...(Number.isFinite(amount) && amount > 0 ? { credit: amount } : {}), ...askAgain(nextOpens(done)) }
         }
-        if (campaigns.length) return { outcome: "failed", message: "campaigns: today's credits aren't offered yet" }
+        // the next day's credits open at a time the list says: ask then,
+        // not half an hour later
+        if (campaigns.length) {
+          const next = Math.min(...campaigns.flatMap((c) => [at(c.startAt), nextOpens(c)]).filter((t) => t > now))
+          return { outcome: "failed", message: "campaigns: today's credits aren't offered yet", ...askAgain(next) }
+        }
         // Asked without Qoder CN's identity and offered nothing: what an
         // international list says to a request without one, so say why
         // (no Qoder CN on this machine) or ask again (it didn't answer).
@@ -2620,7 +2655,7 @@ const makePlugin = (site) => async ({ client }) => {
       if (claimRes.status !== 200) return { outcome: "failed", message: `claim: HTTP ${claimRes.status}` }
       if (said === "CLAIMED") {
         const amount = Number(claim?.benefit?.amount ?? claim?.data?.benefit?.amount ?? campaign.benefit?.amount)
-        return { outcome: "claimed", ...(Number.isFinite(amount) && amount > 0 ? { credit: amount } : {}) }
+        return { outcome: "claimed", ...(Number.isFinite(amount) && amount > 0 ? { credit: amount } : {}), ...askAgain(nextOpens(campaign)) }
       }
       return { outcome: "failed", message: `claim: ${said || "unknown answer"}` }
     } catch (e) {
