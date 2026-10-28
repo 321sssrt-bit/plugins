@@ -527,3 +527,29 @@ test("a job token the models hook renewed is said renewed by the next answer", a
   const again = await l.fetch(API_CHAT, { method: "POST", body: JSON.stringify({ model: "nomodel", messages: [] }) })
   expect(again.headers.get("X-Magpie-Sign-In")).toBe(null)
 })
+
+// Ariel on Discord: an international free account (personal_standard) signed
+// in but showed no credits. Its envelope is the owner's free account's
+// (2026-10-28, read-only) with no add-on credits: a plan of 0 beside add-on
+// credits of 0, or none at all. Qoder's client shows it 0/0, out of credits.
+test("a free account with no credits shows none left, not nothing", () => {
+  const free = (extra) => ({
+    displayMode: "qoder",
+    qoderUsage: {
+      userType: "personal_standard",
+      usageType: "credits",
+      totalUsagePercentage: 0,
+      isQuotaExceeded: true,
+      expiresAt: 253402214400000,
+      userQuota: { total: 0, used: 0, remaining: 0, percentage: 0, unit: "credits" },
+      ...extra,
+      isPlanQuotaProrated: false,
+    },
+  })
+  const none = [{ name: "Credits", used: 100, display: "0 credits left" }]
+  expect(_internal.parseUsage(free({})).windows).toEqual(none)
+  expect(_internal.parseUsage(free({ addOnQuota: { total: 0, used: 0, remaining: 0, percentage: 0, unit: "credits" } })).windows).toEqual(none)
+  // a pool that can't be read is no word that the account has none
+  expect(_internal.parseUsage({ displayMode: "qoder", qoderUsage: { userType: "personal_standard", userQuota: { total: "0" } } }).windows).toEqual([])
+  expect(_internal.parseUsage({ displayMode: "qoder", qoderUsage: { userType: "personal_standard" } }).windows).toEqual([])
+})

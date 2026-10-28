@@ -2179,6 +2179,15 @@ function parseUsage(env) {
   }
   const dedicated = field("dedicatedResourcePackages", "dedicated_resource_packages")
   for (const b of Array.isArray(dedicated) ? dedicated : []) add(b, "Dedicated credits")
+  // A free account (personal_standard) with no add-on credits has a plan of
+  // 0 and nothing else: Qoder's client shows that pool as 0/0 and counts the
+  // account as out of credits. Without a window of its own magpie showed no
+  // credits at all (Ariel on Discord), so it reads as none left.
+  if (out.windows.length === 0) {
+    const zero = (b) => b !== null && typeof b === "object" && !Array.isArray(b) && (b.total ?? b.cap) === 0
+    const pools = [field("userQuota", "user_quota"), field("addOnQuota", "add_on_quota"), field("orgResourcePackage", "org_resource_package")]
+    if (pools.some(zero)) out.windows.push({ name: "Credits", used: 100, display: "0 credits left" })
+  }
   return out
 }
 
