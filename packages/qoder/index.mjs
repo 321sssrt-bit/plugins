@@ -2128,7 +2128,20 @@ function when(v) {
   return new Date(Math.trunc(n < 1e12 ? n * 1000 : n)).toISOString()
 }
 
-// parseUsage is the plan and each pool of credits the envelope tells.
+// SPENT_IN_TURN are the pools Qoder spends one after another before an
+// account stops: the plan's credits, the account's own add-on credits and,
+// on a team, the organisation's shared add-on credits (docs.qoder.com/Credits
+// and account/teams/shared-add-on-credits: the soonest to expire first, the
+// plan's before add-on on the same day). The envelope's own
+// totalUsagePercentage counts them as one too. So the account has left what
+// they have left together: a plan used up beside add-on credits is no
+// account used up (magpie-community/plugins#454).
+const SPENT_IN_TURN = new Set(["Credits", "Add-on credits", "Shared credits"])
+
+// parseUsage is the plan and each pool of credits the envelope tells. When
+// more than one of the pools spent in turn holds credits, "Total credits"
+// is what they hold together, the one routing counts, and each pool is
+// shown beside it, set aside.
 function parseUsage(env) {
   if (env.displayMode === "enterprise") return { plan: "Enterprise" }
   const u = env.qoderUsage
@@ -2148,11 +2161,22 @@ function parseUsage(env) {
     if (total == null || total <= 0 || (b.used == null && b.remaining == null)) return
     const used = b.used != null ? b.used : total - b.remaining
     if (used < 0) return
-    out.windows.push({ name: b.name || name, used: Math.min(100, (100 * used) / total), display: `${gfmt(used)} / ${gfmt(total)} ${b.unit || "credits"}` })
+    const unit = b.unit || "credits"
+    const w = { name: b.name || name, used: Math.min(100, (100 * used) / total), display: `${gfmt(used)} / ${gfmt(total)} ${unit}` }
+    out.windows.push(w)
+    if (SPENT_IN_TURN.has(name)) turn.push({ w, used: Math.min(used, total), total, unit })
   }
+  const turn = []
   add(field("userQuota", "user_quota"), "Credits")
   add(field("addOnQuota", "add_on_quota"), "Add-on credits")
   add(field("orgResourcePackage", "org_resource_package"), "Shared credits")
+  // one count only when every pool counts in the same unit
+  if (turn.length > 1 && turn.every((p) => p.unit === turn[0].unit)) {
+    const used = turn.reduce((a, p) => a + p.used, 0)
+    const total = turn.reduce((a, p) => a + p.total, 0)
+    for (const p of turn) p.w.aside = true
+    out.windows.unshift({ name: "Total credits", used: Math.min(100, (100 * used) / total), display: `${gfmt(used)} / ${gfmt(total)} ${turn[0].unit}` })
+  }
   const dedicated = field("dedicatedResourcePackages", "dedicated_resource_packages")
   for (const b of Array.isArray(dedicated) ? dedicated : []) add(b, "Dedicated credits")
   return out
