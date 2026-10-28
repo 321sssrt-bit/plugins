@@ -94,6 +94,8 @@ AutoClaw 对话网关对请求形状有硬性要求，缺任一条都回 `406 No
 - **不发送 X-Harness-Type**：上游收到 `X-Harness-Type` 即报 406，已删除该残留请求头
 - **改写外部 Harness 身份声明**：上游拦截 system 中包含的外部 agent 身份句（如 `You are Codex`、`You are Claude Code` 等），插件的 `unflag` 会自动将其替换为兼容措辞，避免 406 拦截
 
+- **官方客户端指纹（国际版对话）**：国际版对话请求带官方 AutoClaw 2.0.3 桌面端（`official` 渠道）的整套请求头，取自其 AppImage 的 `dist/main.cjs`：`X-Channel: official`、`X-Version: 2.0.3`、`X-Lang: en`、`X-Client-Type: pc`、`X-Product: autoclaw`、`x_trace_id: autoclaw-desktop`、`X-Auth-Appid/X-Auth-TimeStamp/X-Auth-Sign`（`md5("100003&<秒级时间戳>&<appKey>")`，与登录/积分接口同一签名）、`X-Request-Id` = `X-Trace-Id`（每次请求一个 UUID）、`X-Session-Id`（同一对话不变的 UUID，插件由对话首条消息导出）、OpenAI SDK 6.26.0 的 `User-Agent` 与 `X-Stainless-*`。`X-Tm` 与官方 `managedPlatform()` 一致：macOS `mac`、Windows `win`、Linux `linux`（x64/arm64 相同）。网关只在**非官方指纹**旁拒收 `X-Tm: linux`（403 `forbidden`，#367）；0.2.7–0.2.11 发的 `linux-x64` 只是绕过，不是官方值。
+
 国内版 `autoclaw-cn` 走 AutoClaw 2.1.0 managed gateway（`autoglm-acceleration-api.zhipuai.cn`）；国际版 `autoclaw` 走海外直连网关（`autoglm-api.autoglm.ai`）。两者均已通过真实调用与推理验证。
 
 ## 已知行为

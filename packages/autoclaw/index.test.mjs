@@ -302,7 +302,7 @@ test("overseas loader().fetch drops X-Harness-Type and explains 406", async () =
     expect(sent.body.messages[0].content.startsWith(OFFICIAL_SYSTEM_PROMPT)).toBe(true)
     expect(sent.body.messages[0].content).not.toMatch(/DeepSeek Harness/)
     expect(sent.headers.get("X-Harness-Type")).toBe(null)
-    expect(sent.headers.get("User-Agent")).toMatch(/^AutoClaw\//)
+    expect(sent.headers.get("User-Agent")).toBe("OpenAI/JS 6.26.0")
 
     status = 406
     const refused = await loader.fetch("x", { method: "POST", body })
@@ -678,28 +678,91 @@ test("usage: the credit balance and its wallets are the balance, never a window 
   }
 })
 
-// #367 (menhouran): the overseas gateway answers X-Tm "linux" with
-// 403 {"message":"forbidden"} for a valid token; the official Linux client
-// sends "linux-x64", which it takes
-test("X-Tm is the official client's platform id: mac, win, linux-x64, never the bare linux", async () => {
+// #367 (menhouran): the overseas gateway refuses X-Tm "linux" only beside a
+// non-official fingerprint. The official AutoClaw 2.0.3 client sends "linux"
+// (managedPlatform() in its main.cjs: darwin mac, win32 win, else
+// process.platform) with channel "official", version 2.0.3 and a signed
+// X-Auth-*; 0.2.7's "linux-x64" was a bypass, not what it sends.
+test("X-Tm is the official client's platform id: mac, win, and linux as is", () => {
   const { platformTm, bizHeaders } = _internal
   expect(platformTm("darwin")).toBe("mac")
   expect(platformTm("win32")).toBe("win")
-  expect(platformTm("linux")).toBe("linux-x64")
+  expect(platformTm("linux")).toBe("linux")
   expect(bizHeaders("t")["X-Tm"]).toBe(platformTm(process.platform))
-  expect(bizHeaders("t")["User-Agent"]).not.toMatch(/x64-x64|linux-x64-/)
+})
+
+test("the overseas chat carries the official AutoClaw 2.0.3 fingerprint", async () => {
+  const { platformTm, md5Hex, stainlessOs, stainlessArch } = _internal
   const realFetch = globalThis.fetch
-  let sent
-  globalThis.fetch = async (input, init) => { sent = new Headers(init?.headers); return new Response("{}") }
+  const sent = []
+  globalThis.fetch = async (input, init) => { sent.push({ url: String(input), headers: new Headers(init?.headers) }); return new Response("{}") }
+  const body = (text) => JSON.stringify({ model: "zai_glm-5.3-flash", messages: [{ role: "system", content: "sys" }, { role: "user", content: text }] })
   try {
     const hooks = await AutoclawAuthPlugin({ client: { auth: { set: async () => {} } } })
     const loader = await hooks.auth.loader(async () => ({ type: "oauth", access: "a1" }))
-    await loader.fetch("x", { method: "POST", body: JSON.stringify({ model: "zai_glm-5.3-flash", messages: [{ role: "user", content: "hi" }] }) })
-    expect(sent.get("X-Tm")).toBe(platformTm(process.platform))
-    expect(sent.get("X-Tm")).not.toBe("linux")
+    const before = Math.floor(Date.now() / 1000)
+    await loader.fetch("x", {
+      method: "POST",
+      headers: { "Authorization": "Bearer caller", "User-Agent": "ai-sdk/openai-compatible", "X-Stainless-Lang": "python", "X-Harness-Type": "x" },
+      body: body("hi"),
+    })
+    const after = Math.floor(Date.now() / 1000)
+    const h = sent[0].headers
+    expect(sent[0].url).toBe("https://autoglm-api.autoglm.ai/autoclaw-proxy/proxy/autoclaw/v1/chat/completions")
+    expect(h.get("X-Channel")).toBe("official")
+    expect(h.get("X-Version")).toBe("2.0.3")
+    expect(h.get("X-Tm")).toBe(platformTm(process.platform))
+    expect(h.get("X-Product")).toBe("autoclaw")
+    expect(h.get("X-Lang")).toBe("en")
+    expect(h.get("X-Client-Type")).toBe("pc")
+    expect(h.get("x_trace_id")).toBe("autoclaw-desktop")
+    expect(h.get("X-Auth-Appid")).toBe("100003")
+    const ts = Number(h.get("X-Auth-TimeStamp"))
+    expect(ts).toBeGreaterThanOrEqual(before)
+    expect(ts).toBeLessThanOrEqual(after)
+    expect(h.get("X-Auth-Sign")).toBe(md5Hex(`100003&${h.get("X-Auth-TimeStamp")}&38d2391985e2369a5fb8227d8e6cd5e5`))
+    const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+    expect(h.get("X-Request-Id")).toMatch(uuid)
+    expect(h.get("X-Trace-Id")).toBe(h.get("X-Request-Id"))
+    expect(h.get("X-Session-Id")).toMatch(uuid)
+    expect(h.get("X-Request-Model")).toBe("zai_glm-5.3-flash")
+    expect(h.get("X-Authorization")).toBe("Bearer a1")
+    expect(h.get("Authorization")).toBeNull()
+    expect(h.get("X-Harness-Type")).toBeNull()
+    expect(h.get("User-Agent")).toBe("OpenAI/JS 6.26.0")
+    expect(h.get("X-Stainless-Lang")).toBe("js")
+    expect(h.get("X-Stainless-Package-Version")).toBe("6.26.0")
+    expect(h.get("X-Stainless-OS")).toBe(stainlessOs(process.platform))
+    expect(h.get("X-Stainless-Arch")).toBe(stainlessArch(process.arch))
+    expect(h.get("X-Stainless-Runtime")).toBe("node")
+    expect(h.get("X-Stainless-Runtime-Version")).toBe("v24.18.0")
+
+    // one conversation keeps its session id across turns, and a new one gets another
+    await loader.fetch("x", { method: "POST", body: JSON.stringify({ model: "zai_glm-5.3-flash", messages: [{ role: "system", content: "sys" }, { role: "user", content: "hi" }, { role: "assistant", content: "yo" }, { role: "user", content: "more" }] }) })
+    await loader.fetch("x", { method: "POST", body: body("another chat") })
+    expect(sent[1].headers.get("X-Session-Id")).toBe(h.get("X-Session-Id"))
+    expect(sent[2].headers.get("X-Session-Id")).not.toBe(h.get("X-Session-Id"))
+    expect(sent[1].headers.get("X-Request-Id")).not.toBe(h.get("X-Request-Id"))
   } finally {
     globalThis.fetch = realFetch
   }
+})
+
+test("on Linux the official fingerprint says linux, x64 and arm64 alike", () => {
+  const { setOfficialChatHeaders } = _internal
+  for (const arch of ["x64", "arm64"]) {
+    const h = setOfficialChatHeaders(new Headers(), { accessToken: "a1", model: "m", sessionId: "s", platform: "linux", arch })
+    expect(h.get("X-Tm")).toBe("linux")
+    expect(h.get("X-Stainless-OS")).toBe("Linux")
+    expect(h.get("X-Stainless-Arch")).toBe(arch)
+    expect(h.get("X-Channel")).toBe("official")
+  }
+  const mac = setOfficialChatHeaders(new Headers(), { accessToken: "a1", model: "m", sessionId: "s", platform: "darwin", arch: "arm64" })
+  expect(mac.get("X-Tm")).toBe("mac")
+  expect(mac.get("X-Stainless-OS")).toBe("MacOS")
+  const win = setOfficialChatHeaders(new Headers(), { accessToken: "a1", model: "m", sessionId: "s", platform: "win32", arch: "x64" })
+  expect(win.get("X-Tm")).toBe("win")
+  expect(win.get("X-Stainless-OS")).toBe("Windows")
 })
 
 // plugins#274: the CN managed gateway answers a spent quota with a 403 whose
