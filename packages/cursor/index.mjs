@@ -981,22 +981,66 @@ function fitEffort(want, levels) {
 // can't give is a failure: magpie keeps the list it had. A usable list it
 // can't give leaves the picker as it is.
 const lists = new Map()
+// listings are the lists being asked for now, by token: callers at once
+// share one ask; listFailed when a token's last ask failed
+const listings = new Map()
+const listFailed = new Map()
 async function usable(tok) {
   const h = createHash("sha256").update(tok).digest("hex")
   const had = lists.get(h)
   if (had && Date.now() - had.at < MODELS_KEEP) return had.raw
-  const [j, listed] = await Promise.all([
-    unary(API, "aiserver.v1.AiService/AvailableModels", tok, { useModelParameters: true, doNotUseMarkdown: true }, 30_000),
-    unary(API, "agent.v1.AgentService/GetUsableModels", tok, {}, 8_000).then(
-      (u) => (Array.isArray(u?.models) ? u.models : []),
-      () => [],
-    ),
-  ])
-  const ids = new Set(listed.flatMap((m) => [m?.modelId, m?.displayModelId]).filter(Boolean))
-  const raw = modelsOf(Array.isArray(j?.models) ? j.models : [], ids.size ? ids : null, listed)
-  if (!raw.length) throw new Error("Cursor listed no models")
-  lists.set(h, { at: Date.now(), raw })
-  return raw
+  return listing(tok, h)
+}
+function listing(tok, h) {
+  let p = listings.get(h)
+  if (p) return p
+  p = (async () => {
+    const [j, listed] = await Promise.all([
+      unary(API, "aiserver.v1.AiService/AvailableModels", tok, { useModelParameters: true, doNotUseMarkdown: true }, 30_000),
+      unary(API, "agent.v1.AgentService/GetUsableModels", tok, {}, 8_000).then(
+        (u) => (Array.isArray(u?.models) ? u.models : []),
+        () => [],
+      ),
+    ])
+    const ids = new Set(listed.flatMap((m) => [m?.modelId, m?.displayModelId]).filter(Boolean))
+    const raw = modelsOf(Array.isArray(j?.models) ? j.models : [], ids.size ? ids : null, listed)
+    if (!raw.length) throw new Error("Cursor listed no models")
+    lists.set(h, { at: Date.now(), raw })
+    listFailed.delete(h)
+    return raw
+  })()
+    .catch((e) => {
+      listFailed.set(h, Date.now())
+      throw e
+    })
+    .finally(() => listings.delete(h))
+  listings.set(h, p)
+  return p
+}
+
+// LIST_RETRY is how long a request goes on without the list after Cursor
+// couldn't give it, before it waits for an ask again.
+const LIST_RETRY = 5 * 60_000
+
+// listFor is the list a chat request picks its variant from. It is asked
+// before the Run, so a request never waits on it when it needn't: a list
+// past MODELS_KEEP is used as it is while a new one is asked for, and
+// after a failed ask the requests go without one for LIST_RETRY, as the
+// failed ask left them, instead of each waiting up to AvailableModels'
+// 30 s again before its Run (ysm119 on Discord: 33–36 s to the first
+// token on every Opus request). Only a token with no list at all, and no
+// failure lately, waits for it.
+async function listFor(tok) {
+  const h = createHash("sha256").update(tok).digest("hex")
+  const had = lists.get(h)
+  if (had && Date.now() - had.at < MODELS_KEEP) return had.raw
+  if (had) {
+    listing(tok, h).catch(() => {})
+    return had.raw
+  }
+  const failed = listFailed.get(h)
+  if (failed && Date.now() - failed < LIST_RETRY) return []
+  return listing(tok, h).catch(() => [])
 }
 
 // named is the model and variant an id the list doesn't have stands for,
@@ -2872,10 +2916,7 @@ async function answerOf(auth, chat, signal, session = "") {
   if (prepared.owner) r = prepared.owner.resume({ ...prepared, estimate: conversation(chat, tools).estimate }, signal)
   const model = String(chat.model ?? "")
   if (!r) {
-    let raw = []
-    try {
-      raw = await usable(tok)
-    } catch {}
+    const raw = await listFor(tok)
     // fast only when asked: a service_tier of priority or fast is on; any
     // other tier, or none, is off, unless the id is a fast one of Cursor's own
     const tier = chat.service_tier
@@ -3106,4 +3147,4 @@ export async function CursorAuthPlugin() {
 }
 
 // for tests
-export const _internal = { keychain, keychainToken, nativeTransport, onDemandOf,resetH1: () => (h1Until = 0), onH1: () => Date.now() < h1Until, resetTeam: () => { teamRead.at = 0; teamRead.info = null }, expireTeam: () => (teamRead.at = 0),H2, H1, h2Blocked, open, openH1, openH2, STEP_WAIT, stepUsage, usageKey, ledger, owed, flights, misses, unreadable, catalog, usable, request, modelsOf, tokensOf, maxRequired, conversationID, usageOf, sessionOf, SESSION, errorResponse, kept, poolBase, conversation, buildRun, decode, exec, fields, pb, pbValue, pbAny, frame, frames, failure, toolsOf, expiry }
+export const _internal = { listFor, lists, keychain, keychainToken, nativeTransport, onDemandOf,resetH1: () => (h1Until = 0), onH1: () => Date.now() < h1Until, resetTeam: () => { teamRead.at = 0; teamRead.info = null }, expireTeam: () => (teamRead.at = 0),H2, H1, h2Blocked, open, openH1, openH2, STEP_WAIT, stepUsage, usageKey, ledger, owed, flights, misses, unreadable, catalog, usable, request, modelsOf, tokensOf, maxRequired, conversationID, usageOf, sessionOf, SESSION, errorResponse, kept, poolBase, conversation, buildRun, decode, exec, fields, pb, pbValue, pbAny, frame, frames, failure, toolsOf, expiry }

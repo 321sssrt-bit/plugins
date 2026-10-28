@@ -227,6 +227,11 @@ minutes), the way pi-cursor-sdk lists Cursor's catalog:
   and `service_tier` counting as for a listed model. The list doesn't show
   these ids: pick the `@<size>` model for a window that is the model's.
 
+A chat request picks its variant from the same list without waiting for it
+when it needn't: a list past its 10 minutes is used while a new one is
+asked for, requests at once share one ask, and after an ask fails requests
+go without the list for 5 minutes instead of each waiting for it again.
+
 ## Usage
 
 magpie shows Cursor Models, Other Models and Total for the billing period.
