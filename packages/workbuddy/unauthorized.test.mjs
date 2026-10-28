@@ -11,6 +11,7 @@ import { test, expect, afterAll, beforeAll, afterEach } from "bun:test"
 import { mkdirSync, writeFileSync, rmSync, realpathSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
+import { unz } from "./testdata/unz.mjs"
 
 let WorkBuddyAuthPlugin, WorkBuddyAIAuthPlugin, _internal
 beforeAll(async () => {
@@ -51,9 +52,12 @@ function serve({ good = ["new"], refresh = () => ok(RENEWED), chat, meter } = {}
   globalThis.fetch = async (url, init) => {
     const u = new URL(String(url instanceof Request ? url.url : url))
     const headers = new Headers(init?.headers)
-    calls.push({ path: u.pathname, headers, body: init?.body })
+    calls.push({ path: u.pathname, headers, body: unz(init?.body) })
     const token = (headers.get("authorization") ?? "").replace(/^Bearer /, "")
     if (u.pathname === REFRESH) return refresh(headers)
+    // the model list a chat that names no effort reads its default from
+    // (withDefaultEffort): no model listed, so no effort added
+    if (u.pathname === "/v3/config") return ok({ models: [] })
     if (u.pathname === SUMMARY) return meter ? meter(token) : good.includes(token) ? ok({ IsPaidUser: false, Packages: [] }) : refusedToken()
     if (chat) return chat(token)
     return good.includes(token) ? new Response(STREAM, { headers: { "content-type": "text/event-stream" } }) : refusedToken()

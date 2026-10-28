@@ -4,6 +4,7 @@
 // one by one made of it.
 import { expect, test } from "bun:test"
 import { WorkBuddyAuthPlugin, _internal } from "./index.mjs"
+import { unz } from "./testdata/unz.mjs"
 
 const { prepared, withSystem, fitted, normalizeToolChoice, withoutUnsigned } = _internal
 
@@ -87,7 +88,7 @@ test("the loader parses a long chat once", async () => {
     return realParse(s, ...a)
   }
   globalThis.fetch = async (_url, init) => {
-    out = init.body
+    out = unz(init.body)
     return new Response('data: {"choices":[{"delta":{"content":"OK"}}]}\n\ndata: [DONE]\n\n', { headers: { "content-type": "text/event-stream" } })
   }
   try {

@@ -235,7 +235,16 @@ is used.
 - Kimi-K3, Kimi-K2.6
 - MiniMax-M3
 
-A model's reasoning levels are its variants (`reasoningEffort`).
+A model's reasoning levels are its variants (`reasoningEffort`). A chat
+that names no level goes at the model's own default from the config
+(`reasoning.defaultEffort`, "high" for DeepSeek-V4.1-Flash), as WorkBuddy's
+client sends it: WorkBuddy doesn't think when a chat names none, so
+OpenCode's default variant got answers without thinking. An effort the
+client names, `none` too, goes as it came.
+
+A chat goes gzipped (`Content-Encoding: gzip`), as WorkBuddy's own client
+sends its model requests (`RequestBodyGzip` in both builds' product.json).
+Claude's Messages route goes as it came.
 
 A model's price is its `credits` ("x0.29") and the config's
 `modelPromotions`. A discount for whole days (Step-5-Preview's 独家限免) is

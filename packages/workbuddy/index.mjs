@@ -13,6 +13,7 @@ import { createHash, randomBytes } from "node:crypto"
 import { readFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
+import { gzipSync } from "node:zlib"
 
 const APP_VERSION = "2.0.0" // the version WorkBuddy's sign-in page is opened with
 const POLL_MS = 1000
@@ -1289,6 +1290,24 @@ function fitted(body) {
   }
 }
 
+// gzipped is a chat's body compressed, as WorkBuddy's own client sends its
+// model requests: its CLI's GzipRequestProcessor (WorkBuddy 5.9.3, CLI
+// 2.165.0; WorkBuddy AI 5.8.4 the same) gzips each POST's body and sets
+// Content-Encoding: gzip when the product's RequestBodyGzip feature is on,
+// which both builds' product.json turn on and /v3/config (merged over it)
+// doesn't turn off. Sent as plain JSON, a long agent conversation went up
+// whole on every step: runmiNeverstop on X saw 2.89 GB up to
+// copilot.tencent.com against 258 MB down. Measured 2026-10-28 on
+// www.workbuddy.ai: a gzipped chat answers as the plain one does. A
+// Messages request (Claude on the China build) goes as it came: that route
+// wasn't tried gzipped. null when the body isn't sent gzipped.
+function gzipped(native, b) {
+  if (native) return null
+  if (typeof b === "string") return gzipSync(Buffer.from(b))
+  if (b instanceof ArrayBuffer || ArrayBuffer.isView(b)) return gzipSync(b)
+  return null
+}
+
 // prepared is a request's body read once for every change the loader makes
 // to it and everything it reads off it (plugins#461): a long chat, 45 MiB
 // of history, was parsed six times on its way, once by each step, and
@@ -2119,6 +2138,37 @@ function effortsOf(d, site, id) {
   return EFFORT_ORDER.filter((e) => set.has(e))
 }
 
+// defaultEffortOf is the level WorkBuddy's own client asks a model for when
+// the user picked none: its CLI's configureThinkingSettings (WorkBuddy
+// 5.9.3, CLI 2.165.0) takes the session's effort, else the settings', else
+// the config's reasoning.defaultEffort, else reasoning.effort, and sends it
+// as reasoning_effort unless thinking was turned off. A request with no
+// reasoning_effort is not thinking on WorkBuddy's side: measured 2026-10-28
+// on www.workbuddy.ai, deepseek-v4.1-flash (defaultEffort "high") answered
+// with 0 reasoning tokens without one, and thought at low and high
+// (troilus1011 on X, OpenCode's default variant). A default the model's
+// levels don't hold is left out, as the CLI clamps it to one they do.
+function defaultEffortOf(d, efforts) {
+  const own = d.reasoning?.defaultEffort ?? d.reasoning?.effort
+  return typeof own === "string" && efforts.includes(own) ? own : undefined
+}
+
+// withDefaultEffort gives a chat that names no effort the model's default
+// (defaultEffortOf), as WorkBuddy's client sends it; true when it did. An
+// effort the client named, "none" too, goes as it came.
+function withDefaultEffort(chat, list) {
+  if (!chat || typeof chat !== "object" || namesEffort(chat)) return false
+  const m = list?.find((x) => x.id === chat.model)
+  if (!m?.effort) return false
+  chat.reasoning_effort = m.effort
+  return true
+}
+
+// namesEffort is whether a chat names its effort itself, in either spelling
+function namesEffort(chat) {
+  return chat.reasoning_effort !== undefined || (!!chat.reasoning && typeof chat.reasoning === "object" && chat.reasoning.effort !== undefined)
+}
+
 async function liveModels(site, a) {
   const headers = new Headers()
   sign(site, a, headers)
@@ -2145,6 +2195,8 @@ async function liveModels(site, a) {
         if (es.length) {
           const canOff = d.reasoning?.canDisableThinking
           m.efforts = [...(!d.onlyReasoning && (canOff == null || canOff) ? ["none"] : []), ...es]
+          const def = defaultEffortOf(d, es)
+          if (def) m.effort = def
         }
       }
       out.push(m)
@@ -2237,6 +2289,24 @@ function makePlugin(site) {
     lists.set(k, { at: Date.now(), list })
     if (lists.size > 64) lists.delete(lists.keys().next().value)
     return list
+  }
+  // effortList is the list a chat's default effort is read from
+  // (withDefaultEffort): listed's, or null when there is none to read — a
+  // key WorkBuddy's CLI reads no config with (as models does), or a read
+  // that failed within PRICE_TTL, so a config that can't be read costs a
+  // chat one try a minute, not one each
+  const unlisted = new Map()
+  const effortList = async (a) => {
+    if (a.source === "key" && !remoteConfig(a.key)) return null
+    const k = listKey(a)
+    if (Date.now() - (unlisted.get(k) ?? 0) < PRICE_TTL) return null
+    try {
+      return await listed(a)
+    } catch {
+      unlisted.set(k, Date.now())
+      if (unlisted.size > 64) unlisted.delete(unlisted.keys().next().value)
+      return null
+    }
   }
   const freeOnly = () => magpie?.option?.(site.id, FREE_ONLY) === true
   // onlyFree is a list with the switch on: its free models, or a failure
@@ -2369,10 +2439,20 @@ function makePlugin(site) {
             let changed = p.changed
             body = p.body
             if (!native) names = p.names
+            // a chat that names no effort is asked at the model's default,
+            // as WorkBuddy's client asks it (withDefaultEffort); with no
+            // list to read (effortList) the chat goes as it came
+            if (!native && chat && !namesEffort(chat) && withDefaultEffort(chat, await effortList(a))) changed = true
             chatHeaders(site, headers)
             attendChat(headers, chat, session)
-            const post = (b) =>
-              fetch(req ? req.url : input, { ...init, method: init?.method ?? req?.method, headers, body: b }).catch((e) => unanswered(site, a, b, e, init?.signal))
+            const post = (b) => {
+              // a chat goes gzipped, as WorkBuddy's client sends it
+              // (gzipped); its size on the wire is what unanswered weighs
+              const z = gzipped(native, b)
+              if (z) headers.set("Content-Encoding", "gzip")
+              else headers.delete("Content-Encoding")
+              return fetch(req ? req.url : input, { ...init, method: init?.method ?? req?.method, headers, body: z ?? b }).catch((e) => unanswered(site, a, z ?? b, e, init?.signal))
+            }
             // a 401 is answered once, on whichever try meets it: by a
             // sign-in with another access token (reissued), the request
             // sent once more with it, never again after that; else, or
@@ -2653,4 +2733,4 @@ export const WorkBuddyAuthPlugin = makePlugin(SITES.workbuddy)
 export const WorkBuddyAIAuthPlugin = makePlugin(SITES["workbuddy-ai"])
 
 // for tests
-export const _internal = { FREE_ONLY, PRICE_TTL, keyAccount, remoteConfig, cycleOf, typeUnions, systemAsUser, systemKey, DEFAULT_SYSTEM, EDGE_READS, fitShape, replyAfterTools, AFTER_TOOLS_REFUSED, enterpriseUsageOf, notDesktop, textOnly, runsOutOf, packagesOf, endOf, enterpriseHeaders, enterpriseOf, liveModels, browserSignIn, withSystem, asReasoning, normalizeToolChoice, fitTools, fitted, renamed, unflagged, usageOf, desktopHeld, explained, REFUSED_HINT, RESTRICTED_HINT, EXHAUSTED_HINT, freeCredits, creditsOf, priceOf, fresh, SITES, renewing, renewed, SESSION, attend, turnKey, conversationKey, signatureOf, isMessages, withoutUnsigned, withoutSignedThinking, prepared, answeredBefore, nativeOf, modelOf, configModels, API_MESSAGES: NPM_MESSAGES, API_CHAT: NPM }
+export const _internal = { withDefaultEffort, defaultEffortOf, gzipped, FREE_ONLY, PRICE_TTL, keyAccount, remoteConfig, cycleOf, typeUnions, systemAsUser, systemKey, DEFAULT_SYSTEM, EDGE_READS, fitShape, replyAfterTools, AFTER_TOOLS_REFUSED, enterpriseUsageOf, notDesktop, textOnly, runsOutOf, packagesOf, endOf, enterpriseHeaders, enterpriseOf, liveModels, browserSignIn, withSystem, asReasoning, normalizeToolChoice, fitTools, fitted, renamed, unflagged, usageOf, desktopHeld, explained, REFUSED_HINT, RESTRICTED_HINT, EXHAUSTED_HINT, freeCredits, creditsOf, priceOf, fresh, SITES, renewing, renewed, SESSION, attend, turnKey, conversationKey, signatureOf, isMessages, withoutUnsigned, withoutSignedThinking, prepared, answeredBefore, nativeOf, modelOf, configModels, API_MESSAGES: NPM_MESSAGES, API_CHAT: NPM }
