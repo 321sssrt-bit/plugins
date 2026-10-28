@@ -221,6 +221,14 @@ const CATALOG = [
   { id: "deepseek-v4.1-flash", name: "DeepSeek V4.1 Flash" },
 ]
 
+// Every model listed takes text alone: the vision ones (`-vl`) are left out
+// (parseModelInfo), and the rest answer an image with
+// `InferHub.001001020.406` "The request model is not multimodal". Said in so
+// many words (`image: false`, not left out, which magpie reads as unknown),
+// so magpie describes an image for the model or leaves it out, and an agent
+// is told it takes none.
+const TEXT_ONLY = { input: { text: true, image: false, audio: false, video: false, pdf: false } }
+
 // ---- small helpers ---------------------------------------------------------
 
 const firstOf = (...vs) => vs.find((v) => typeof v === "string" && v.trim())?.trim() ?? ""
@@ -1076,7 +1084,17 @@ function isRateLimitCode(code) {
 function embeddedErrorStatus(code) {
   if (isRateLimitCode(code)) return 429
   if (/(^|\.)40[0-4](\.|$)|InferHub\.400[0-9]\./.test(String(code ?? ""))) return 400
+  if (isNotMultimodal(code)) return 400
   return 502
+}
+
+/**
+ * An image sent to a text-only model (`InferHub.001001020.406` "The request
+ * model is not multimodal"): the request's content, which no retry and no
+ * other account changes.
+ */
+function isNotMultimodal(codeOrText) {
+  return /InferHub\.001001020\.406|not multimodal/i.test(String(codeOrText ?? ""))
 }
 
 /** Does this event carry part of an answer (not only a role or a keepalive)? */
@@ -1234,7 +1252,8 @@ async function foldAnswer(res, head, names = null) {
     const body = names ? JSON.stringify(restoreToolNames(whole, names)) : text
     return new Response(body, { status: res.status, statusText: res.statusText, headers })
   }
-  return errorResponse(502, errorCodeOf(text), firstOf(errorMessageOf(text), "the gateway returned an empty answer"))
+  const code = errorCodeOf(text)
+  return errorResponse(code ? embeddedErrorStatus(code) : 502, code, firstOf(errorMessageOf(text), "the gateway returned an empty answer"))
 }
 
 /** An OpenAI-shaped error carrying the vendor's code and words (magpie adds the provider name). */
@@ -1632,6 +1651,9 @@ async function signedFetch(cred, input, init, context) {
         }
         return errorResponse(429, SESSION_LIMIT_ERROR, firstOf(errorMessageOf(text), "并发会话数已达上限，请稍后再试"))
       }
+      // an image the model can't take is the request's fault, whatever
+      // status it came with
+      if (!res.ok && isNotMultimodal(code || text)) return errorResponse(400, code, firstOf(errorMessageOf(text), "the model takes no images"))
       if (!res.ok) return rebuildResponse(res, text)
       return errorResponse(embeddedErrorStatus(code), code, firstOf(errorMessageOf(text), "the gateway answered with an error"))
     }
@@ -2341,14 +2363,19 @@ export const CodeArtsAuthPlugin = async ({ client } = {}, options = {}) => {
     // Declared so a caller never sends its own, larger default.
     limit: { context: m.context ?? 0, output: MAX_OUTPUT_TOKENS },
     tool_call: true,
+    // Text only (TEXT_ONLY): said, not left out, so an agent sends no image.
+    attachment: false,
+    modalities: { input: ["text"], output: ["text"] },
   })
 
   const modelOf = (provider, live, state) => {
     const base = provider.models?.[live.id] ?? {}
     const capabilities = {
-      temperature: true, toolcall: true, attachment: false, input: { text: true }, output: { text: true },
+      temperature: true, toolcall: true, output: { text: true }, attachment: false,
       ...(base.capabilities ?? {}),
       ...(live.reasoning ? { reasoning: true } : {}),
+      // what the user's own config says of a kind stands; the rest is text only
+      input: { ...TEXT_ONLY.input, ...(base.capabilities?.input ?? {}) },
     }
     // magpie's own fields: `free` (from the free daily pool, the same answer
     // the signed `maas_type: benefit` header follows, so a model never shows
@@ -2648,7 +2675,7 @@ export const _internal = {
   PACKAGE_CREDIT_PAGE_URL, OPS_CREDIT_OVERVIEW_URL, OPS_CREDIT_CAMPAIGN_URL,
   toBytes, isBenefitModel, prepareChatBody, signedFetch, signedGet,
   TOOL_NAME_LIMIT, cutToolName, shortenToolNames, restoreToolNames, restoreToolNamesInStream,
-  parseSseEvents, errorCodeOf, errorMessageOf, isStaleCredential, isRateLimitCode, embeddedErrorStatus, classifyHead,
+  parseSseEvents, errorCodeOf, errorMessageOf, isStaleCredential, isRateLimitCode, embeddedErrorStatus, isNotMultimodal, classifyHead,
   peekAnswer, completionFromChunks, createConcurrencyGate, delay, retryDelayMs,
   isRegularModel, queueInfoOf, waitInQueue, TRACE_QUEUE_URL, SESSION_HEADER,
   snapRequest, dailyCheckin,

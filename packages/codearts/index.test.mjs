@@ -943,6 +943,62 @@ test("the free model's TPM limit inside a 200 is a 429 magpie fails over on, not
   }
 })
 
+// star21321321124 (Discord, 10-28): an agent sent DeepSeek V4.1 Flash an
+// image, and the "502: you can retry" had it ask again and again.
+const notMultimodal = { error_code: "InferHub.001001020.406", error_msg: "The request model is not multimodal" }
+
+test("an image a text-only model turns away is a 400, not a 502 to retry, on every path", async () => {
+  const cred = await makeCred()
+  let answer = () => sseResponse(sse(notMultimodal))
+  const plugin = await CodeArtsAuthPlugin({ client: {} }, { fetch: async () => answer() })
+  const loaded = await plugin.auth.loader(async () => makeAuth(cred))
+  const ask = (stream) => loaded.fetch(CHAT_URL, chatInit({ model: "deepseek-v4.1-flash", messages: [{ role: "user", content: "看图" }], stream }))
+  const cases = [
+    ["inside a 200", () => sseResponse(sse(notMultimodal))],
+    ["as a 502", () => new Response(JSON.stringify(notMultimodal), { status: 502, headers: { "content-type": "application/json" } })],
+    ["as a 406", () => new Response(JSON.stringify(notMultimodal), { status: 406, headers: { "content-type": "application/json" } })],
+  ]
+  for (const [how, make] of cases) {
+    answer = make
+    for (const stream of [true, false]) {
+      const res = await ask(stream)
+      assert.equal(res.status, 400, `${how}, stream ${stream}`)
+      const body = await res.json()
+      assert.equal(body.error.code, "InferHub.001001020.406", how)
+      assert.match(body.error.message, /not multimodal/, how)
+    }
+  }
+})
+
+test("every model says it takes text alone, so an agent sends it no image", async () => {
+  const plugin = await CodeArtsAuthPlugin({ client: {} }, {})
+  const config = {}
+  await plugin.config(config)
+  for (const [id, m] of Object.entries(config.provider.codearts.models)) {
+    assert.deepEqual(m.modalities, { input: ["text"], output: ["text"] }, id)
+    assert.equal(m.attachment, false, id)
+  }
+
+  const cred = await makeCred()
+  const listed = await CodeArtsAuthPlugin({ client: {} }, { fetch: modelsFetcher([], { agents: agentList, detail: agentDetail }) })
+  // the host's entry for a config model, and one the user said sees
+  const provider = {
+    models: {
+      "GLM-5.2": { capabilities: { input: { text: true, image: false } } },
+      "glm-5.3-flash": { capabilities: { input: { text: true, image: true } } },
+    },
+  }
+  const models = await listed.provider.models(provider, { auth: makeAuth(cred) })
+  // glm-5.3 only the agent lists, deepseek-v4-flash-0731 has no entry of its own
+  for (const id of ["GLM-5.2", "glm-5.3", "deepseek-v4-flash-0731"]) {
+    assert.equal(models[id].capabilities.input.image, false, id)
+    assert.equal(models[id].capabilities.input.text, true, id)
+    assert.equal(models[id].capabilities.attachment, false, id)
+  }
+  // what the user's own config says stands
+  assert.equal(models["glm-5.3-flash"].capabilities.input.image, true)
+})
+
 test("embeddedErrorStatus sorts the gateway's codes into what magpie acts on", () => {
   assert.equal(x.embeddedErrorStatus("InferHub.4291.200"), 429)
   assert.equal(x.embeddedErrorStatus("81114.429"), 429)
@@ -950,6 +1006,7 @@ test("embeddedErrorStatus sorts the gateway's codes into what magpie acts on", (
   assert.equal(x.embeddedErrorStatus("ModelArts.81009.404"), 400)
   assert.equal(x.embeddedErrorStatus("InferHub.001001005.400"), 400)
   assert.equal(x.embeddedErrorStatus("InferHub.5000.500"), 502)
+  assert.equal(x.embeddedErrorStatus("InferHub.001001020.406"), 400)
 })
 
 test("every chat carries the agent's session headers: one session, a fresh trace", async () => {

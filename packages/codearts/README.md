@@ -73,6 +73,10 @@ signing in, a short built-in catalog stands in.
   `mcp__plugin_android-emulator_android-emulator__android_discover_project`) goes as its first
   55 characters, `_` and 8 hex of its SHA-256, and the tool calls in the answer, streamed or
   not, carry the agent's own name again.
+- Every model is listed as text only (`modalities.input: ["text"]`, `image: false`): CodeArts
+  answers an image with `InferHub.001001020.406` "The request model is not multimodal". Since
+  0.2.4 magpie is told so, and describes an image for the model or leaves it out. That refusal,
+  inside a `200` or with any status, comes back as a `400`, not a `502` an agent would ask again.
 
 ## Usage and check-in
 
@@ -130,6 +134,8 @@ magpie 里使用其 GLM、DeepSeek、openPangu 等模型。provider id：`codear
   只对流式回答计量积分），调用方要非流式时折叠回 JSON；默认注入 `thinking: { type: "enabled" }`，思考与
   正文分开；200 里内嵌的错误换算为 `429` / `400` / `502` 并带厂商原话；码道只接受不超过 64 个字符的工具名，
   更长的（如 MCP 工具名）发出时缩为前 55 个字符 + `_` + 8 位 SHA-256，回答（流式与非流式）里的工具调用再换回原名。
+  0.2.4 起所有模型都声明为只收文本（码道对图片回 `InferHub.001001020.406`「The request model is not multimodal」），
+  magpie 会替模型描述图片或把图片略去；这个拒绝不论放在 200 里还是带别的状态码，都换算为 `400`，而不是让智能体反复重试的 `502`。
 - **用量与签到**：总积分决定账号是否可用，其余积分桶只做明细；另有每日免费额度窗口。各批积分的到期
   时间读自码道控制台同一批接口，读不到时退回插件的签到账本 `~/.config/magpie/codearts-checkins.json`
   （这部分仍在用更多账号验证，请以控制台为准）。`auth.checkin` 与客户端「限时福利 → 每日领取」一致
