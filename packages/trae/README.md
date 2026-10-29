@@ -458,8 +458,14 @@ answered it 9074 even with the client's headers.
   machine whose two profiles (`Trae CN`, `TRAE SOLO CN`) were both the
   first account's; it checked in and the second got 9074, which took
   running `clientDevice` by hand to explain. A profile started with its
-  own `--user-data-dir` is still not read: whether TRAE CN keeps a
-  separate, registered device there is not known yet (plugins#436).
+  own `--user-data-dir` is not read, and there is no reason to: on
+  2026-10-29 TRAE CN 3.4.4 (Windows 11) kept a second account's sign-in
+  apart in such a folder but gave it the same device id as the default
+  folder, and the client itself said 「本设备今日已签到」 for that
+  account. The check-in is counted per device, so on one machine only the
+  first account to check in gets the day's credits; the others' usage,
+  models and requests are unaffected (plugins#436, closed as not
+  planned).
 - **A claim's code 0 is not the answer (0.2.22):** Trae answers a
   claim code 0 for one that registered nothing, so the status is read back
   after every claim and only a day that is in is reported as `claimed`.
