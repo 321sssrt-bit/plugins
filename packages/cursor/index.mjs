@@ -532,13 +532,21 @@ async function hardLimit(tok) {
 // dollars, thousands grouped: a team's pool runs to six figures ($451,200.00)
 const dollars = (n) => "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
+// INCLUDED_ONLY is the switch (magpie's plugin options, off by default)
+// that keeps an account in routing only while its included usage lasts
+// (magpie-community/plugins#485): on, the included pools (Cursor Models and
+// Other Models; an Enterprise account's allowance) are what stops it, and
+// On-demand and Total are shown only, a budget with room or none at all
+// keeping nothing in routing. Off, on-demand that can still pay keeps it.
+const INCLUDED_ONLY = "included_only"
+
 // enterpriseUsage is the allowance GetCurrentPeriodUsage leaves out on an
 // Enterprise account. That call answers with only the billing cycle there;
 // the website's usage-summary has individualUsage.overall, in cents, and
 // the account's membership. The CLI JWT is also the website's dashboard
 // session, as botUsage builds it. undefined when the summary says nothing
 // this can show, so a failed read stays an empty card, as before.
-async function enterpriseUsage(tok) {
+async function enterpriseUsage(tok, includedOnly = false) {
   try {
     const subject = JSON.parse(Buffer.from(tok.split(".")[1], "base64url").toString()).sub
     if (typeof subject !== "string") return undefined
@@ -569,8 +577,9 @@ async function enterpriseUsage(tok) {
     const unlimited = od?.enabled === true && od.limit === null
     const fixed = od?.enabled === true && typeof od.limit === "number" && Number.isFinite(od.limit) && od.limit > 0 && spent
     // Only an explicitly unlimited budget or a measured budget with room
-    // lets a spent included allowance stay available to magpie's routing.
-    const aside = unlimited || (fixed && od.used < od.limit)
+    // lets a spent included allowance stay available to magpie's routing,
+    // and neither does with INCLUDED_ONLY on.
+    const aside = !includedOnly && (unlimited || (fixed && od.used < od.limit))
     const windows = [{
       name: "Enterprise",
       used: Math.max(0, Math.min(100, (100 * used) / limit)),
@@ -589,6 +598,7 @@ async function enterpriseUsage(tok) {
       limit: od.limit / 100,
       unit: "USD",
       ...resets,
+      ...(includedOnly ? { aside: true } : {}),
     })
     else if (unlimited && spent) windows.push({ name: "On-demand", used: 0, display: dollars(od.used / 100), ...resets, aside: true })
     return windows
@@ -603,9 +613,11 @@ async function enterpriseUsage(tok) {
 // Discord: a team that pays for more) is still served when the pools are
 // spent, so they are shown aside, and its On-demand spend is what can run
 // out: at its limit (a team member with none of their own: the team's
-// pool), or never when it has none. An Enterprise account's period has no
-// planUsage; its allowance comes from usage-summary instead.
-async function usage(tok, ids) {
+// pool), or never when it has none. With includedOnly (INCLUDED_ONLY on)
+// the pools are the allowance whatever on-demand allows, and On-demand is
+// shown only. An Enterprise account's period has no planUsage; its
+// allowance comes from usage-summary instead.
+async function usage(tok, ids, includedOnly = false) {
   const [res, hard] = await Promise.all([
     fetch(API + "/aiserver.v1.DashboardService/GetCurrentPeriodUsage", {
       method: "POST",
@@ -620,7 +632,7 @@ async function usage(tok, ids) {
   const u = data?.planUsage
   if (!u) {
     // Prefer measured Enterprise usage before any reset-date-only fallback.
-    const windows = await enterpriseUsage(tok)
+    const windows = await enterpriseUsage(tok, includedOnly)
     return windows ? { windows } : { windows: [] }
   }
   const ms = /^[+-]?\d+$/.test(data.billingCycleEnd ?? "") ? Number(data.billingCycleEnd) : 0
@@ -642,10 +654,10 @@ async function usage(tok, ids) {
   const pool = [...new Set(["auto", ...asked, ...(data.autoBucketModels ?? [])])].filter(inPool)
   const num = (v) => (typeof v === "number" ? v : 0)
   const od = onDemandOf(data, hard)
-  const pooled = od.kind === "fixed" || od.kind === "unlimited" ? { aside: true } : {}
+  const pooled = !includedOnly && (od.kind === "fixed" || od.kind === "unlimited") ? { aside: true } : {}
   const onDemand =
     od.kind === "fixed"
-      ? [{ name: "On-demand", used: Math.max(0, Math.min(100, (100 * od.usedDollars) / od.limitDollars)), display: `${dollars(od.usedDollars)} / ${dollars(od.limitDollars)}` + (od.mineDollars === undefined ? "" : ` (you: ${dollars(od.mineDollars)})`), ...resets }]
+      ? [{ name: "On-demand", used: Math.max(0, Math.min(100, (100 * od.usedDollars) / od.limitDollars)), display: `${dollars(od.usedDollars)} / ${dollars(od.limitDollars)}` + (od.mineDollars === undefined ? "" : ` (you: ${dollars(od.mineDollars)})`), ...resets, ...(includedOnly ? { aside: true } : {}) }]
       : od.kind === "unlimited"
         ? [{ name: "On-demand", used: 0, display: dollars(od.usedDollars), ...resets, aside: true }]
         : []
@@ -3172,7 +3184,16 @@ async function answerOf(auth, chat, signal, session = "") {
 
 // ---- the plugin ---------------------------------------------------------------------------
 
-export async function CursorAuthPlugin() {
+export async function CursorAuthPlugin(input) {
+  // includedOnly is the user's INCLUDED_ONLY as magpie has it now, read at
+  // each usage reading so a change needs no restart; false outside magpie
+  const includedOnly = () => {
+    try {
+      return input?.magpie?.option?.(ID, INCLUDED_ONLY) === true
+    } catch {
+      return false
+    }
+  }
   return {
     auth: {
       provider: ID,
@@ -3205,6 +3226,16 @@ export async function CursorAuthPlugin() {
         { type: "oauth", label: "cursor-agent's sign-in", authorize: cliSignIn },
         { type: "api", label: "Cursor API key (cursor.com/dashboard → Integrations)" },
       ],
+      // magpie's own switches (input.magpie.option), read at each usage
+      // reading
+      options: [
+        {
+          key: INCLUDED_ONLY,
+          label: "Included usage only",
+          description:
+            "Keeps an account in routing only while its included usage lasts: once Cursor Models or Other Models is used up, magpie moves those models to the next account until the period resets, even if on-demand could pay. On-demand and Total are still shown but never keep an account in routing.",
+        },
+      ],
       // magpie's: how much of the plan's included usage is gone (the plan
       // is the one the sign-in read). The built-in's read, clean or not,
       // neither marked the account nor cleared it.
@@ -3215,7 +3246,7 @@ export async function CursorAuthPlugin() {
         } catch (e) {
           return { error: e.message, windows: [], signIn: "kept" }
         }
-        const [u, plan, bot] = await Promise.all([usage(tok, Object.keys(provider?.models ?? {})), planOf(tok), botUsage(tok)])
+        const [u, plan, bot] = await Promise.all([usage(tok, Object.keys(provider?.models ?? {}), includedOnly()), planOf(tok), botUsage(tok)])
         // Bot goes among magpie's three menu-bar rings: before Total, and
         // before an On-demand with no limit, which is only a dollar figure on
         // a ring that never fills (magpie #2213, Morganwan90). An On-demand
