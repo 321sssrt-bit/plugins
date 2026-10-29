@@ -2,6 +2,7 @@
 // 只用内置模块，不装依赖。
 
 import { createServer } from "node:http";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, extname, normalize } from "node:path";
@@ -194,11 +195,35 @@ function firstLine(messages) {
 // magpie 的插件页面跑在 sandbox="allow-scripts" 的框架里，origin 是 opaque，
 // 浏览器发来的 Origin 就是字面量 "null"。直接在地址栏打开同一个服务时，Origin 是本服务自己。
 // 其他来源一律拒绝：这个服务能替用户烧额度，不能给任意网页用。
+//
+// Origin 为 null 不能说明请求来自 magpie 的框架：任何网站里的 sandbox 框架、
+// data: 页面也都发 Origin: null。所以 /api/* 还要一把只在本进程里的口令：
+// 对话页的 HTML 由本服务给出时把口令写进页面（那份 HTML 不带 CORS 头，
+// 别的页面读不到它），页面每个 /api/ 请求都带上它。
+// Host 也要是本服务自己：DNS 重绑定的页面与本服务同源，Origin 挡不住它。
 let OWN = new Set();
+let HOSTS = new Set();
+const TOKEN = randomBytes(32).toString("hex");
+export const TOKEN_HEADER = "x-magpie-chat-token";
 
 function originAllowed(req) {
   const o = req.headers.origin;
   return o === undefined || o === "null" || OWN.has(o);
+}
+
+function hostAllowed(req) {
+  return HOSTS.has(String(req.headers.host || "").toLowerCase());
+}
+
+function tokenOK(req) {
+  const got = Buffer.from(String(req.headers[TOKEN_HEADER] || ""));
+  const want = Buffer.from(TOKEN);
+  return got.length === want.length && timingSafeEqual(got, want);
+}
+
+// 这几个由 <img>/<link> 或独立启动脚本取，带不了口令头；它们给出的东西不涉密
+function open(path) {
+  return path === "/api/ping" || path === "/api/fonts.css" || path.startsWith("/api/icon/");
 }
 
 function corsHeaders(req) {
@@ -206,18 +231,18 @@ function corsHeaders(req) {
   const allow = o === "null" ? "null" : o && OWN.has(o) ? o : "null";
   return {
     "access-control-allow-origin": allow,
-    "access-control-allow-headers": "content-type",
+    "access-control-allow-headers": "content-type, " + TOKEN_HEADER,
     "access-control-allow-methods": "GET,POST,DELETE,OPTIONS",
     vary: "Origin",
   };
 }
 
-function send(res, status, body, type = "application/json; charset=utf-8") {
+function send(res, status, body, type = "application/json; charset=utf-8", cors = true) {
   const data = typeof body === "string" || body instanceof Uint8Array ? body : JSON.stringify(body);
   res.writeHead(status, {
     "content-type": type,
     "cache-control": "no-store",
-    ...corsHeaders(res.req),
+    ...(cors ? corsHeaders(res.req) : {}),
     "x-content-type-options": "nosniff",
   });
   res.end(data);
@@ -512,8 +537,10 @@ async function runChat({ res, body, settings, store }, controllers) {
 export async function startServer({ configDir: dir, options = {} } = {}) {
   const store = createStore(dir || configDir());
   const controllers = new Map();
-  const port = Number(options.port || process.env.MAGPIE_CHAT_PORT || 3477);
-  OWN = new Set([`http://127.0.0.1:${port}`, `http://localhost:${port}`]);
+  // 0 也是合法的（让系统挑一个空闲端口，测试用）
+  const want = options.port ?? process.env.MAGPIE_CHAT_PORT;
+  const port = want !== undefined && want !== "" && Number.isFinite(Number(want)) ? Number(want) : 3477;
+  let actualPort = port;
 
   // 模型列表缓存几十秒，够界面用，又不用每次开页都等网关
   let cache = { at: 0, models: [] };
@@ -527,10 +554,15 @@ export async function startServer({ configDir: dir, options = {} } = {}) {
   const server = createServer(async (req, res) => {
     const url = new URL(req.url || "/", "http://127.0.0.1:" + port);
     const path = url.pathname;
+    if (!hostAllowed(req)) return send(res, 403, { error: "只服务于 magpie 窗口里的对话页" }, undefined, false);
     if (!originAllowed(req)) return send(res, 403, { error: "只服务于 magpie 窗口里的对话页" });
     if (req.method === "OPTIONS") {
       res.writeHead(204, corsHeaders(req));
       return res.end();
+    }
+    if (path.startsWith("/api/") && !open(path) && !tokenOK(req)) {
+      // 服务重启过时口令就换了：页面重新载入一次就拿到新的
+      return send(res, 403, { error: "口令不对：请重新打开对话页", reload: true });
     }
 
     try {
@@ -558,7 +590,7 @@ export async function startServer({ configDir: dir, options = {} } = {}) {
           if (!effortOK) settings.effort = "";
           return send(res, 200, {
             port,
-            version: "0.1.0",
+            version: VERSION,
             gateway: gatewayURL(options),
             settings,
             models: list,
@@ -571,7 +603,11 @@ export async function startServer({ configDir: dir, options = {} } = {}) {
         if (iconHit && req.method === "GET") {
           const pid = decodeURIComponent(iconHit[1]);
           const icon = await readProviderIcon(pid, dir).catch(() => null);
-          if (icon && icon.url) return send(res, 302, "", "text/plain");
+          if (icon && icon.url) {
+            // 远程图标：让 <img> 自己去取（原来的 302 没带 Location，图标一直是坏的）
+            res.writeHead(302, { location: icon.url, "cache-control": "public, max-age=86400" });
+            return res.end();
+          }
           // 没有图片文件就画一个首字母徽章（magpie 的内置图标编在二进制里，取不到）
           const body = icon ? icon.data : letterIcon(pid);
           res.writeHead(200, {
@@ -673,11 +709,17 @@ export async function startServer({ configDir: dir, options = {} } = {}) {
       }
 
       // 静态：对话页自己的文件
+      // 对话页的 HTML 里有口令，所以它不带 CORS 头，别的页面读不到；
+      // 其它静态文件要带（opaque 的页面取 KaTeX 的字体是跨源请求）
       const rel = normalize(decodeURIComponent(path)).replace(/^([/\\.]+)/, "");
       const file = join(UI_ROOT, rel === "" ? "index.html" : rel);
-      if (!file.startsWith(UI_ROOT)) return send(res, 403, { error: "forbidden" });
+      if (!file.startsWith(UI_ROOT)) return send(res, 403, { error: "forbidden" }, undefined, false);
       const data = await readFile(file).catch(() => null);
-      if (!data) return send(res, 404, "没有这个文件", "text/plain; charset=utf-8");
+      if (!data) return send(res, 404, "没有这个文件", "text/plain; charset=utf-8", false);
+      if (file === join(UI_ROOT, "index.html")) {
+        const html = data.toString("utf8").replace("<head>", `<head>\n<meta name="magpie-chat-token" content="${TOKEN}">`);
+        return send(res, 200, html, MIME[".html"], false);
+      }
       return send(res, 200, data, MIME[extname(file).toLowerCase()] || "application/octet-stream");
     } catch (err) {
       if (res.headersSent) { try { res.end(); } catch { /* 已结束 */ } return; }
@@ -708,8 +750,6 @@ export async function startServer({ configDir: dir, options = {} } = {}) {
     server.listen(0, "127.0.0.1");
   });
 
-  const actualPort = port;
-
   // 端口固定用 3477 —— 带路页写死了跳这个端口（页面 CSP 是 connect-src 'none'，
   // 没法先探测再决定跳哪，只能盲跳）。所以这里也必须是 3477，换端口页面就连不上了。
   // 被上一次的宿主占着就等它松手，最多等 6 秒。
@@ -725,6 +765,9 @@ export async function startServer({ configDir: dir, options = {} } = {}) {
     }
   }
   if (!bound) throw new Error(`${port} 一直被占用，服务起不来`);
+  actualPort = server.address().port;
+  OWN = new Set([`http://127.0.0.1:${actualPort}`, `http://localhost:${actualPort}`]);
+  HOSTS = new Set([`127.0.0.1:${actualPort}`, `localhost:${actualPort}`]);
 
   // 把实际端口写到配置目录，带路页（page/boot.js）会来读 ——
   // 端口可能是换过的，页面不能假设永远是 3477。

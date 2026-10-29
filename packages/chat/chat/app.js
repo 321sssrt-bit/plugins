@@ -489,11 +489,33 @@ function toast(text, isError) {
 
 /* ================= HTTP ================= */
 
+/* 服务给这个页面的口令（写在 HTML 的 meta 里），每个 /api/ 请求都带上：
+   别的页面也能发 Origin: null 的请求，口令才说明请求来自这个页面。 */
+var TOKEN = (function () {
+  var m = document.querySelector('meta[name="magpie-chat-token"]');
+  return m ? m.getAttribute("content") || "" : "";
+})();
+
+function authHeaders(extra) {
+  var h = Object.assign({}, extra || {});
+  h["x-magpie-chat-token"] = TOKEN;
+  return h;
+}
+
+/* 服务重启过，口令就换了：重新载入一次页面拿新的（只试一次） */
+var reloaded = false;
+function reloadForToken(res, data) {
+  if (res.status === 403 && data && data.reload && !reloaded) {
+    reloaded = true;
+    try { location.reload(); } catch (e) { /* 载不了就把错误露出来 */ }
+  }
+}
+
 function api(path, options) {
   var opts = options || {};
-  var init = { method: opts.method || "GET", credentials: "omit", cache: "no-store" };
+  var init = { method: opts.method || "GET", credentials: "omit", cache: "no-store", headers: authHeaders() };
   if (opts.body !== undefined) {
-    init.headers = { "content-type": "application/json" };
+    init.headers = authHeaders({ "content-type": "application/json" });
     init.body = JSON.stringify(opts.body);
   }
   if (opts.signal) init.signal = opts.signal;
@@ -502,6 +524,7 @@ function api(path, options) {
       var data = null;
       if (text) { try { data = JSON.parse(text); } catch (e) { data = null; } }
       if (!res.ok) {
+        reloadForToken(res, data);
         var msg = (data && (data.error || data.message)) || text.slice(0, 240) || ("HTTP " + res.status);
         throw new Error(msg);
       }
@@ -535,7 +558,7 @@ function parseEventBlock(block) {
 function streamChat(payload, onEvent, signal) {
   return fetch("/api/chat", {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: authHeaders({ "content-type": "application/json" }),
     body: JSON.stringify(payload),
     credentials: "omit",
     cache: "no-store",
@@ -544,7 +567,7 @@ function streamChat(payload, onEvent, signal) {
     if (!res.ok) {
       return res.text().then(function (text) {
         var msg = text.slice(0, 300);
-        try { var parsed = JSON.parse(text); msg = parsed.error || msg; } catch (e) { /* 原样 */ }
+        try { var parsed = JSON.parse(text); msg = parsed.error || msg; reloadForToken(res, parsed); } catch (e) { /* 原样 */ }
         throw new Error("请求失败：" + (msg || res.status));
       });
     }
