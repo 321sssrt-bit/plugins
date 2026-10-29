@@ -137,8 +137,11 @@ Each chat carries WorkBuddy's headers:
 - the conversation's ids: `X-Conversation-ID`, `X-Conversation-Request-ID`,
   `X-Conversation-Message-ID`, `X-Request-ID`. WorkBuddy's backend counts a
   user send as one request by `X-Conversation-Request-ID`, so every step of
-  one send — a tool result sent back, a retry, another account answering —
-  carries the same one, and the user's next message carries another. The
+  one send — a tool result sent back, a retry — carries the same one, and
+  the user's next message carries another. Both ids are one account's own,
+  as WorkBuddy's client is signed in as one: a conversation sent as another
+  account (another of a group, or a sign-in saved since) carries that
+  account's ids, never the same ones under two `X-User-Id`s. The
   conversation's is the session magpie (or OpenCode) names the request by,
   else the chat's first user message; nothing is made up when neither names
   one, a made-up conversation of the request's own being what splits one

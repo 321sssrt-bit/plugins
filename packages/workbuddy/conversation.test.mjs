@@ -1,9 +1,11 @@
 // One user send is one request to WorkBuddy's backend, whatever it takes:
-// every step of it — a tool result sent back, a retry, another account
-// answering — carries the same X-Conversation-Request-ID, and the user's next
+// every step of it — a tool result sent back, a retry — carries the same
+// X-Conversation-Request-ID, and the user's next
 // message carries another. A conversation's turns share its
 // X-Conversation-ID, from the session magpie (or OpenCode) names, else from
 // the chat's first user message; each request has a message id of its own.
+// Both are one account's own: WorkBuddy's client is signed in as one, so a
+// conversation sent as two accounts is two conversations to WorkBuddy.
 import { afterEach, expect, test } from "bun:test"
 import { WorkBuddyAIAuthPlugin, WorkBuddyAuthPlugin, _internal } from "./index.mjs"
 
@@ -14,7 +16,7 @@ afterEach(() => (globalThis.fetch = real))
 // ask sends a chat as magpie's host does: the chat.headers hook is told the
 // session, then the loader's fetch is given what it added, and the request
 // WorkBuddy was sent is read back. Nothing leaves the machine.
-async function ask(body, { session = "", provider = "workbuddy", plugin = WorkBuddyAuthPlugin, headers = {} } = {}) {
+async function ask(body, { session = "", provider = "workbuddy", plugin = WorkBuddyAuthPlugin, headers = {}, uid = "u1", enterpriseId } = {}) {
   const sent = []
   globalThis.fetch = async (url, init) => {
     sent.push(new Headers(init?.headers))
@@ -23,7 +25,7 @@ async function ask(body, { session = "", provider = "workbuddy", plugin = WorkBu
   const hooks = await plugin({ client: {} })
   const out = { headers: { ...headers } }
   await hooks["chat.headers"]({ sessionID: session, model: { providerID: provider, id: "glm-5.3" }, provider: { info: { id: provider } } }, out)
-  const l = await hooks.auth.loader(async () => ({ type: "oauth", access: "tok", uid: "u1", expires: Date.now() + 3600_000 }))
+  const l = await hooks.auth.loader(async () => ({ type: "oauth", access: "tok", uid, ...(enterpriseId ? { enterpriseId } : {}), expires: Date.now() + 3600_000 }))
   const res = await l.fetch("https://copilot.tencent.com/v2/chat/completions", {
     method: "POST",
     headers: new Headers(out.headers),
@@ -222,4 +224,28 @@ test("the same words in another conversation are another turn", async () => {
   const a = await ask(later("fix it", "继续"))
   expect(turn(await ask(later("fix it", "继续")))).toBe(turn(a))
   expect(turn(await ask(later("other", "继续")))).not.toBe(turn(a))
+})
+
+test("a conversation's ids are one account's own: another account sends others", async () => {
+  // as magpie spreads one session over a group's accounts
+  const one = await ask(send("fix the bug"), { session: "ses_1", uid: "u1" })
+  const again = await ask(send("fix the bug"), { session: "ses_1", uid: "u1" })
+  const two = await ask(send("fix the bug"), { session: "ses_1", uid: "u2" })
+  expect(conv(two)).toMatch(HEX32)
+  expect(turn(two)).toMatch(HEX32)
+  // the same account keeps them
+  expect(conv(again)).toBe(conv(one))
+  expect(turn(again)).toBe(turn(one))
+  // another account has its own
+  expect(conv(two)).not.toBe(conv(one))
+  expect(turn(two)).not.toBe(turn(one))
+  // with no session too: the first user message names it for one account
+  const a = await ask(send("hi"), { uid: "u1" })
+  const b = await ask(send("hi"), { uid: "u2" })
+  expect(conv(a)).not.toBe(conv(b))
+  expect(turn(a)).not.toBe(turn(b))
+  // one user in two enterprises is two accounts as well
+  const team = await ask(send("fix the bug"), { session: "ses_1", uid: "u1", enterpriseId: "e1" })
+  expect(conv(team)).not.toBe(conv(one))
+  expect(turn(team)).not.toBe(turn(one))
 })

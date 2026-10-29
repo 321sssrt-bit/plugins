@@ -446,7 +446,7 @@ async function enterpriseOf(site, a, who) {
 // itself, and the request that carried it. Its backend counts a user send as
 // one request by X-Conversation-Request-ID: a chat carrying a new one every
 // time is counted on its own, so one send that takes several steps — a tool
-// call answered and sent again, a retry, another account answering — shows up
+// call answered and sent again, a retry — shows up
 // in the usage detail as many requests. The ids below are made from what
 // names the conversation and the turn, so every step of one send carries the
 // same turn id and the user's next message carries another, as WorkBuddy's
@@ -719,22 +719,64 @@ function sessionOf(headers) {
 // turn's (one user send, whatever it takes), and the conversation's. A header
 // already there — the caller's own, or another plugin's — is kept, and the
 // message and request ids are the same one, as WorkBuddy's client has them.
-function attend(headers, body, session) {
-  attendChat(headers, chatOf(body), session)
+//
+// who is the account the chat goes as (scopeOf). The ids are that account's
+// own: WorkBuddy's client runs as one account, so one conversation or turn
+// never shows up under two. Without it, one magpie session spread over a
+// group of accounts sent the same X-Conversation-ID and
+// X-Conversation-Request-ID under every account's X-User-Id.
+function attend(headers, body, session, who = "") {
+  return attendChat(headers, chatOf(body), session, who)
 }
 
-function attendChat(headers, chat, session) {
+// attendChat is attend with the chat read already. It returns what reattend
+// needs to set the ids again for another account once the chat itself is
+// let go: the ids it set itself (not the caller's), and the digests of what
+// names the turn and the conversation, which are never sent as they are.
+function attendChat(headers, chat, session, who = "") {
   const conv = conversationParts(chat, session)
+  const turn = turnParts(chat)
+  const ids = {
+    set: [],
+    // a turn is a conversation's own: two conversations whose user message
+    // reads the same are still two sends, not one
+    turn: turn.length ? idFor("turn", [...conv, "|", ...turn]) : "",
+    conv: conv.length ? idFor("conversation", conv) : "",
+  }
+  return setIds(headers, ids, who)
+}
+
+// setIds sets the message's id, and the turn's and conversation's for the
+// account who, where the caller set none.
+function setIds(headers, ids, who) {
   const msg = hex()
   headers.set("X-Conversation-Message-ID", msg)
   headers.set("X-Request-ID", msg)
+  const set = []
+  const own = (kind, base) => (who ? idFor(kind, [`account:${who}`, "|", base]) : base)
   if (!headers.has("X-Conversation-Request-ID")) {
-    const turn = turnParts(chat)
-    // a turn is a conversation's own: two conversations whose user message
-    // reads the same are still two sends, not one
-    headers.set("X-Conversation-Request-ID", turn.length ? idFor("turn", [...conv, "|", ...turn]) : hex())
+    headers.set("X-Conversation-Request-ID", ids.turn ? own("turn", ids.turn) : hex())
+    set.push("X-Conversation-Request-ID")
   }
-  if (conv.length && !headers.has("X-Conversation-ID")) headers.set("X-Conversation-ID", idFor("conversation", conv))
+  if (ids.conv && !headers.has("X-Conversation-ID")) {
+    headers.set("X-Conversation-ID", own("conversation", ids.conv))
+    set.push("X-Conversation-ID")
+  }
+  return { ...ids, set }
+}
+
+// scopeOf names the account a chat goes as for attend: its uid, its
+// enterprise, and for a key account the key (only ever hashed).
+function scopeOf(a) {
+  return `${a?.uid ?? ""}|${a?.enterpriseId ?? ""}|${a?.source === "key" ? a.key ?? "" : ""}`
+}
+
+// reattend sets a chat's ids again for the account it is now sent as, when
+// that is another account than the one they were set for.
+function reattend(headers, ids, was, now) {
+  if (was === now) return ids
+  for (const h of ids.set) headers.delete(h)
+  return setIds(headers, ids, now)
 }
 
 // FLAGGED are the words WorkBuddy refuses a chat for, "Illegal API
@@ -2510,7 +2552,8 @@ function makePlugin(site) {
             const completion = !native && isCompletion(req ? req.url : input, chat)
             if (completion && chat && !namesEffort(chat) && withDefaultEffort(chat, await effortList(a))) changed = true
             chatHeaders(site, headers)
-            attendChat(headers, chat, session)
+            let who = scopeOf(a)
+            let ids = attendChat(headers, chat, session, who)
             const post = (b) => {
               // a chat goes gzipped, as WorkBuddy's client sends it
               // (gzipped); its size on the wire is what unanswered weighs
@@ -2557,6 +2600,7 @@ function makePlugin(site) {
               renewed = true
               a = r.a
               sign(site, a, headers)
+              ids = reattend(headers, ids, who, (who = scopeOf(a)))
               const again = await post(b)
               if (again.status !== 401) return again
               return out("it refused the token renewed for it too", invalidToken(again), again)
@@ -2805,4 +2849,4 @@ export const WorkBuddyAuthPlugin = makePlugin(SITES.workbuddy)
 export const WorkBuddyAIAuthPlugin = makePlugin(SITES["workbuddy-ai"])
 
 // for tests
-export const _internal = { idFor, replyAfterToolsOn, withDefaultEffort, defaultEffortOf, gzipped, FREE_ONLY, PRICE_TTL, keyAccount, remoteConfig, cycleOf, typeUnions, systemAsUser, systemKey, DEFAULT_SYSTEM, EDGE_READS, fitShape, replyAfterTools, AFTER_TOOLS_REFUSED, enterpriseUsageOf, notDesktop, textOnly, runsOutOf, packagesOf, endOf, enterpriseHeaders, enterpriseOf, liveModels, browserSignIn, withSystem, asReasoning, normalizeToolChoice, fitTools, fitted, renamed, unflagged, usageOf, desktopHeld, explained, REFUSED_HINT, RESTRICTED_HINT, EXHAUSTED_HINT, freeCredits, creditsOf, priceOf, fresh, SITES, renewing, renewed, SESSION, attend, turnKey, conversationKey, signatureOf, isMessages, withoutUnsigned, withoutSignedThinking, prepared, answeredBefore, nativeOf, modelOf, configModels, API_MESSAGES: NPM_MESSAGES, API_CHAT: NPM }
+export const _internal = { idFor, replyAfterToolsOn, withDefaultEffort, defaultEffortOf, gzipped, FREE_ONLY, PRICE_TTL, keyAccount, remoteConfig, cycleOf, typeUnions, systemAsUser, systemKey, DEFAULT_SYSTEM, EDGE_READS, fitShape, replyAfterTools, AFTER_TOOLS_REFUSED, enterpriseUsageOf, notDesktop, textOnly, runsOutOf, packagesOf, endOf, enterpriseHeaders, enterpriseOf, liveModels, browserSignIn, withSystem, asReasoning, normalizeToolChoice, fitTools, fitted, renamed, unflagged, usageOf, desktopHeld, explained, REFUSED_HINT, RESTRICTED_HINT, EXHAUSTED_HINT, freeCredits, creditsOf, priceOf, fresh, SITES, renewing, renewed, SESSION, attend, scopeOf, turnKey, conversationKey, signatureOf, isMessages, withoutUnsigned, withoutSignedThinking, prepared, answeredBefore, nativeOf, modelOf, configModels, API_MESSAGES: NPM_MESSAGES, API_CHAT: NPM }
