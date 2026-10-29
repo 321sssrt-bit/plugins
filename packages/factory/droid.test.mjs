@@ -80,15 +80,16 @@ test("another agent's request to /api/llm/o opens with droid's line", async () =
   expect(b.instructions).toBe(DROID_LINE)
 })
 
-// Factory's routing on 2026-10-29 prefers Baseten for 1017 and Fireworks
-// for the original Flash; live 1017 requests succeeded on both upstreams.
-test("1017 uses Baseten with every reasoning effort and keeps the original Flash on Fireworks", async () => {
+// droid sends registry_default with apiProviders[0], so 1017 goes to
+// Fireworks, the first of its ["fireworks","baseten","databricks"].
+test("1017 goes to its registry default, Fireworks, with every reasoning effort", async () => {
   const { send } = await loaded({ ...signedIn })
   const model = "deepseek-v4.1-flash-1017"
   for (const effort of ["none", "low", "high", "max"]) {
     const s = await send(chat, JSON.stringify({ model, messages: [{ role: "user", content: "hi" }], reasoning_effort: effort, stream: true }))
     expect(s.url).toBe(chat)
-    expect(s.headers.get("x-api-provider")).toBe("baseten")
+    expect(s.headers.get("x-api-provider")).toBe("fireworks")
+    expect(s.headers.get("x-provider-routing-source")).toBe("registry_default")
     expect(JSON.parse(s.body)).toMatchObject({ model, reasoning_effort: effort, stream: true })
   }
   const original = await send(chat, JSON.stringify({ model: "deepseek-v4.1-flash", messages: [{ role: "user", content: "hi" }] }))

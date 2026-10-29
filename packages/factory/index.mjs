@@ -87,8 +87,7 @@ const MODELS = [
   ["glm-5.2", "GLM-5.2", CHAT, "baseten", 1040000, 131072, ["none", "high", "max"], false, 0.56],
   ["kimi-k3", "Kimi K3", CHAT, "fireworks", 262144, 65536, ["none", "low", "high", "max"], true, 1.2],
   ["deepseek-v4.1-flash", "DeepSeek V4.1 Flash", CHAT, "fireworks", 1040000, 131072, ["none", "low", "high", "max"], true, 0.12],
-  // Factory's routing prefers Baseten for 1017; both upstreams accept it.
-  ["deepseek-v4.1-flash-1017", "DeepSeek V4.1 Flash 1017", CHAT, "baseten", 1040000, 131072, ["none", "low", "high", "max"], true, 0.12],
+  ["deepseek-v4.1-flash-1017", "DeepSeek V4.1 Flash 1017", CHAT, "fireworks", 1040000, 131072, ["none", "low", "high", "max"], true, 0.12],
   ["qwen3.8-max", "Qwen3.8 Max", CHAT, "fireworks", 262144, 131072, ["low", "medium", "xhigh"], false, 0.8],
   ["minimax-m3", "MiniMax M3", CHAT, "fireworks", 512000, 64000, ["high"], true, 0.12],
   ["minimax-m2.7", "MiniMax M2.7", ANTHROPIC, "fireworks", 196600, 64000, ["high"], false, 0.12],

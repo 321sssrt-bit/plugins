@@ -69,17 +69,18 @@ Each model is served on the one API droid uses for it:
 | Gemini generate (`/api/llm/g/v1/generate`) | Gemini 4 Argon, Gemini 3.1 Pro, Gemini 3.8/3.7/3.6/3.5 Flash, Gemini 3 Flash |
 
 Reasoning efforts are the variants droid offers for each model. DeepSeek V4.1
-Flash (including 1017), Kimi K3 and GLM-5.2 have `none`, droid's "off": they stop thinking.
+Flash (1017 too), Kimi K3 and GLM-5.2 have `none`, droid's "off": they stop
+thinking.
 Reasoning is mandatory on GLM-5.3 and GLM-5.3-Flash (Fireworks turns `none`
 away), so `low` is their least.
 
 DeepSeek V4.1 Flash 1017 (`deepseek-v4.1-flash-1017`) is a separate model
 entry, with droid 0.251.0's 1,040,000-token context, 131,072-token output,
 image support, `none`/`low`/`high`/`max` efforts and 0.12x token multiplier.
-It uses Baseten, first in Factory's routing when checked on 2026-10-29;
-live requests accepted the model on both Baseten and Fireworks. The
-original Flash stays on Fireworks. Factory gates 1017 with a feature flag,
-so availability still depends on the account.
+Like every other model here it goes to its registry's default upstream,
+`apiProviders[0]`, which is Fireworks, as droid sends it with
+`x-provider-routing-source: registry_default`. Factory gates 1017 with a
+feature flag, so availability still depends on the account.
 
 A model's price is its token multiplier in droid's registry
 (`cost.tokenMultiplier`), which magpie shows beside the model as its rate
