@@ -2542,11 +2542,21 @@ const makePlugin = (site) => async ({ client }) => {
       return next
     })
 
+  // the ids Qoder serves: the site's shipped list and every key a listing
+  // has named, on or off
+  const served = new Set(site.models.map((m) => m.id))
+  const knows = (id) => served.has(id)
   const models = async (cred, again = false) => {
     const key = listingKey(cred)
     let l = listings.get(key)
     if (!l || again) {
-      l = modelInfos(await fetchListing(siteOf(site, cred), cred), siteOf(site, cred))
+      const s = siteOf(site, cred)
+      const listing = await fetchListing(s, cred)
+      for (const m of s.modelScene ? (Array.isArray(listing?.[s.modelScene]) ? listing[s.modelScene] : []) : sceneModels(listing)) {
+        const k = String(m?.key ?? "").trim()
+        if (k) served.add(k)
+      }
+      l = modelInfos(listing, s)
       listings.set(key, l)
     }
     return l
@@ -2783,8 +2793,26 @@ const makePlugin = (site) => async ({ client }) => {
   const ask = async (chat, cred, init, named = "", fallback = false, getAuth, asked = {}) => {
     asked.cred = cred
     let m
+    let relogged = false
+    const listed = (ms) => ms.find((x) => x.key === chat.model)
     try {
-      m = (await models(cred)).find((x) => x.key === chat.model) ?? (await models(cred, true)).find((x) => x.key === chat.model)
+      m = listed(await models(cred)) ?? listed(await models(cred, true))
+      // A model Qoder serves that the account's listing leaves out, or has
+      // off, on a job token Qoder no longer honours in full: the token is
+      // renewed once (relogin, as for a refused chat) and the list asked
+      // again. On an enterprise qoder.com account (plugins#484) the listing
+      // had only the free dfmodel and qfmodel on while the job token was
+      // stale, and every other model was answered 400 here, before a chat
+      // could be refused and renew it. An id Qoder has never served is said
+      // unknown at once, with no renewal spent on it.
+      if (!m && getAuth && knows(chat.model)) {
+        relogged = true
+        const next = await relogin(getAuth, cred.access)
+        if (next) {
+          cred = asked.cred = next
+          m = listed(await models(cred, true))
+        }
+      }
     } catch (e) {
       if (e instanceof SignInGone || e?.expired) return signedInError(e)
       return errorResponse({ status: 502, message: e?.message ?? String(e) })
@@ -2804,7 +2832,6 @@ const makePlugin = (site) => async ({ client }) => {
     // resend can be queued again before it is answered.
     const deadline = QUEUE.now() + QUEUE.budget
     const ask = { requestSetId: body.request_set_id, requestId: body.request_id, sessionId: body.session_id, modelKey: m.key }
-    let relogged = false
     for (let sent = 0, waited = 0; ; sent++) {
       if (sent) {
         body.request_id = body.chat_record_id = randomUUID()

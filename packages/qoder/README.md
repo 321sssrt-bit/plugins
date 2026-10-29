@@ -76,6 +76,13 @@ Refreshing:
   or another process renewed it meanwhile, else after one refresh, under the
   same lock. A token renewed less than 5 minutes ago and refused again isn't
   renewed again; the refusal is the answer.
+- A model Qoder serves that the account's listing has off or leaves out is
+  asked for the same way: the job token is renewed once (or the pair saved
+  since is used) and the list read again, before the request is answered
+  `unknown or disabled model`. On a job token Qoder no longer honours in
+  full, the listing can have only the free models on (#484). The same
+  5-minute rule holds, and an id Qoder has never served is said unknown at
+  once, with no renewal.
 - The device token, which reads usage, has no end on record: it is rotated
   when Qoder refuses it. On a [Qoder CN](#qoder-cn) device-token account it
   is the chat token too, and is renewed as above.
