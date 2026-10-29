@@ -92,11 +92,15 @@ const SITES = {
     authID: "workbuddy-desktop-ai",
     platform: "workbuddy-ai",
     ai: true,
-    // WorkBuddy AI 5.8.4.41366630, its update feed's current build on
-    // 2026-10-28 (see the China build's)
-    app: "5.8.4",
-    cli: "2.161.0",
+    // WorkBuddy AI 5.9.3.42398134, its update feed's current build on
+    // 2026-10-29 (see the China build's): the same CLI as the China
+    // build's 5.9.3, byte for byte but for product.json, and the same
+    // Electron (37.10.3); its desktop puts agentRuntime local-agent in the
+    // prompt meta as the China build's does
+    app: "5.9.3",
+    cli: "2.165.0",
     appName: "workbuddy-ai",
+    runtime: "local-agent",
     keys: "https://www.workbuddy.ai/profile/keys",
     models: AI_MODELS,
     // models whose images WorkBuddy AI drops though its config says they
@@ -1328,7 +1332,7 @@ function fitted(body) {
 
 // gzipped is a chat's body compressed, as WorkBuddy's own client sends its
 // model requests: its CLI's GzipRequestProcessor (WorkBuddy 5.9.3, CLI
-// 2.165.0; WorkBuddy AI 5.8.4 the same) gzips each POST's body and sets
+// 2.165.0, on both builds) gzips each POST's body and sets
 // Content-Encoding: gzip when the product's RequestBodyGzip feature is on,
 // which both builds' product.json turn on and /v3/config (merged over it)
 // doesn't turn off. Sent as plain JSON, a long agent conversation went up

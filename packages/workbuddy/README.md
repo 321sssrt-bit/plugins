@@ -126,8 +126,8 @@ Each chat carries WorkBuddy's headers:
 - `Authorization`, `X-User-Id`, `X-Domain`, `X-Product: SaaS`, `X-IDE-Type: WorkBuddy`;
 - the desktop CLI's `User-Agent`, `WorkBuddy/<app> <appName>/<app> CLI/<cli>`:
   `WorkBuddy/5.9.3 WorkBuddy/5.9.3 CLI/2.165.0` on the China build and
-  `WorkBuddy/5.8.4 workbuddy-ai/5.8.4 CLI/2.161.0` on WorkBuddy AI, each
-  build's current app on 2026-10-28; `X-IDE-Version` is the app's version.
+  `WorkBuddy/5.9.3 workbuddy-ai/5.9.3 CLI/2.165.0` on WorkBuddy AI, each
+  build's current app on 2026-10-29; `X-IDE-Version` is the app's version.
   A User-Agent not starting `WorkBuddy/<version>` is answered error 10085;
 - the client's, which WorkBuddy's usage list shows as the client that asked
   (使用端): `X-Agent-Purpose: conversation`, `X-IDE-Name: WorkBuddy`,
@@ -144,7 +144,7 @@ Each chat carries WorkBuddy's headers:
   one, a made-up conversation of the request's own being what splits one
   conversation into many in the usage detail;
 - what the CLI adds to a model request alone: `X-Agent-Type: main` on both
-  builds, `X-Agent-Runtime: local-agent` on the China build (new in 5.9),
+  builds, `X-Agent-Runtime: local-agent` (new in 5.9),
   `Accept: application/json`, and the `X-Stainless-*` headers of the OpenAI
   SDK it sends through (openai 6.25.0 on Electron 37's Node v22.21.1, a
   1200s timeout, no retries).

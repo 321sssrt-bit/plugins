@@ -116,13 +116,12 @@ test("WorkBuddy AI takes the ids too, with its client's headers", async () => {
   expect(turn(ai)).toMatch(HEX32)
   expect(conv(ai)).toMatch(HEX32)
   expect(ai.get("x-ide-name")).toBe("WorkBuddy")
-  expect(ai.get("user-agent")).toBe("WorkBuddy/5.8.4 workbuddy-ai/5.8.4 CLI/2.161.0")
+  expect(ai.get("user-agent")).toBe("WorkBuddy/5.9.3 workbuddy-ai/5.9.3 CLI/2.165.0")
 })
 
 // What WorkBuddy's desktop CLI sends with a chat, read from each build's
-// current app (China 5.9.3 with CLI 2.165.0, WorkBuddy AI 5.8.4 with CLI
-// 2.161.0): UserAgentHttpInterceptor's User-Agent, the app's version as
-// the IDE's, X-Agent-Type on both builds, 5.9's X-Agent-Runtime, and the
+// current app (5.9.3 with CLI 2.165.0 on both):
+// UserAgentHttpInterceptor's User-Agent, the app's version as the IDE's, X-Agent-Type on both builds, 5.9's X-Agent-Runtime, and the
 // OpenAI SDK's headers its fetch passes on.
 test("each build's chat carries its desktop client's headers", async () => {
   const sdk = {
@@ -137,7 +136,7 @@ test("each build's chat carries its desktop client's headers", async () => {
   }
   const want = {
     workbuddy: [WorkBuddyAuthPlugin, { ...sdk, "user-agent": "WorkBuddy/5.9.3 WorkBuddy/5.9.3 CLI/2.165.0", "x-ide-version": "5.9.3", "x-agent-runtime": "local-agent" }],
-    "workbuddy-ai": [WorkBuddyAIAuthPlugin, { ...sdk, "user-agent": "WorkBuddy/5.8.4 workbuddy-ai/5.8.4 CLI/2.161.0", "x-ide-version": "5.8.4", "x-agent-runtime": null }],
+    "workbuddy-ai": [WorkBuddyAIAuthPlugin, { ...sdk, "user-agent": "WorkBuddy/5.9.3 workbuddy-ai/5.9.3 CLI/2.165.0", "x-ide-version": "5.9.3", "x-agent-runtime": "local-agent" }],
   }
   for (const [provider, [plugin, heads]] of Object.entries(want)) {
     const h = await ask(send("hi"), { provider, plugin, headers: { "x-agent-runtime": "cloud-agent" } })
