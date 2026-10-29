@@ -51,6 +51,9 @@
       },
       "file": "page/index.html",
       "icon": "assets/icon.svg"
+    },
+    "options": {
+      "port": 3477
     }
   },
   "scripts": {
