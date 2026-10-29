@@ -68,6 +68,14 @@ Refreshing:
 - Only one refresh runs at a time. A request that reads the sign-in before
   magpie saved a renewal uses the renewed pair, and a renewal handed a pair
   a request already spent gives what that request got.
+- A job token's end is what Qoder says: `expire_time` or `expires_at` (a
+  date, or an epoch in seconds or milliseconds), then `expires_in`
+  (milliseconds), then a day.
+- A chat Qoder answers 401 or 403 with no other code ("Login expired") is
+  sent again once: with the pair saved since, when another request, magpie
+  or another process renewed it meanwhile, else after one refresh, under the
+  same lock. A token renewed less than 5 minutes ago and refused again isn't
+  renewed again; the refusal is the answer.
 - The device token, which reads usage, has no end on record: it is rotated
   when Qoder refuses it. On a [Qoder CN](#qoder-cn) device-token account it
   is the chat token too, and is renewed as above.

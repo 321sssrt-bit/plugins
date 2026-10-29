@@ -56,6 +56,7 @@ const SIGN_IN_TIMEOUT = 15 * 60 * 1000
 const REFRESH_LEAD = 5 * 60 * 1000 // a chat token this close to its end is refreshed before a request
 const RENEW_LEAD = 10 * 60 * 1000 // and this close, magpie renews it ahead of time (auth.refresh)
 const KEEP_SPENT_MS = 60 * 60 * 1000 // how long what a spent refresh token gave is remembered
+const RELOGIN_GAP = 5 * 60 * 1000 // a token renewed this recently that Qoder refuses isn't renewed again
 const DAY = 24 * 60 * 60 * 1000
 const CHAT = "@ai-sdk/openai-compatible"
 
@@ -234,9 +235,33 @@ async function openapi(site, path, { method = "GET", token, body, query } = {}) 
   return { status: res.status, json, text }
 }
 
-// expiresAt is when a job token Qoder gave with expires_in (milliseconds)
-// runs out; a day when it said none.
-const expiresAt = (jt) => Date.now() + (jt.expires_in > 0 ? jt.expires_in : DAY)
+// expiresAt is when a job token Qoder gave runs out, read as Qoder's own
+// client reads it, for a refreshed token as for an exchanged PAT's: its
+// expire_time or expires_at first (a date, or an epoch in seconds or
+// milliseconds), then expires_in (milliseconds), then a day. A refreshed
+// token was read for expires_in alone, so an end Qoder said as a date was
+// put down as a day away, and renewed after it had run out (plugins#474).
+// An end already past is no end said.
+function expiresAt(jt) {
+  for (const k of ["expire_time", "expires_at"]) {
+    const at = whenSaid(jt?.[k])
+    if (at > Date.now()) return at
+  }
+  if (jt?.expires_in > 0) return Date.now() + jt.expires_in
+  return Date.now() + DAY
+}
+
+// whenSaid is the time a token's end field names, in milliseconds: a date,
+// or an epoch in seconds or milliseconds; 0 for none (absent, 0, unreadable).
+function whenSaid(v) {
+  if (typeof v === "number" || /^\d+$/.test(String(v ?? "").trim())) {
+    const n = Number(v)
+    if (!(n > 0)) return 0
+    return n < 1e12 ? n * 1000 : n
+  }
+  const at = Date.parse(String(v ?? "").trim())
+  return isNaN(at) ? 0 : at
+}
 
 // deviceExpiry is when a device token used for chat runs out: its
 // expires_at (a date) or expires_in (seconds), as Qoder's CLI reads it; a
@@ -382,18 +407,6 @@ async function deviceSignIn(site) {
   }
 }
 
-// exchangeExpiry is when a job token from /api/v1/jobToken/exchange runs
-// out, as Qoder's own client reads it: expire_time or expires_at (a date)
-// first, then expires_in (milliseconds), then a day.
-function exchangeExpiry(jt) {
-  for (const k of ["expire_time", "expires_at"]) {
-    const at = Date.parse(String(jt?.[k] ?? "").trim())
-    if (!isNaN(at)) return at
-  }
-  if (jt?.expires_in > 0) return Date.now() + jt.expires_in
-  return Date.now() + DAY
-}
-
 // exchangeToken is the job token from an exchange response, as Qoder's
 // client reads it: token, device_token or access_token.
 function exchangeToken(jt) {
@@ -413,7 +426,7 @@ async function patSignIn(site, pat) {
   const token = exchangeToken(r.json)
   if (!token) throw new Error(`${site.name} PAT exchange: empty token in response`)
   const refresh = String(r.json?.refresh_token ?? r.json?.refreshToken ?? "").trim()
-  const chat = { access: token, refresh, expires: exchangeExpiry(r.json) }
+  const chat = { access: token, refresh, expires: expiresAt(r.json) }
   let email = ""
   let name = ""
   let uid = ""
@@ -1185,9 +1198,11 @@ function failure(status, text) {
   // lapsed: only a refused refresh did (errorResponse says kept). Qoder's
   // own words go with it: a 401 right after signing in isn't a lapsed
   // sign-in, and its reason is what says what is (Yayoi_no_yume on X).
+  // lapsed: the job token the call carried was refused, which the loader
+  // renews once and asks again with (plugins#474) before it says so.
   if (status === 401 || status === 403) {
     const said = msg && msg !== STATUS_CODES[status] ? ` (Qoder said ${status}: ${msg.slice(0, 300)})` : ""
-    return { status: 401, message: "the sign-in lapsed — sign in again" + said }
+    return { status: 401, message: "the sign-in lapsed — sign in again" + said, lapsed: true }
   }
   if (status === 429 || msg.toLowerCase().includes("quota")) return { status: 429, message: "usage limit reached: " + msg }
   return { status, message: msg }
@@ -2501,6 +2516,32 @@ const makePlugin = (site) => async ({ client }) => {
       return next
     })
 
+  // relogin is the account to ask again with once Qoder refused the job
+  // token refused (a chat's 401/403 "Login expired"), or undefined to say
+  // the refusal as it is. Under the lock, as fresh: the sign-in as saved
+  // now (another request, magpie's auth.refresh or another process may
+  // have renewed it meanwhile, and then that is what is used, with no
+  // refresh), else the job token renewed once and saved. Qoder has been
+  // seen to refuse a job token it had put down as a day away for minutes
+  // before magpie renewed it (plugins#474), and a request then failed
+  // until the renewal came. A token this process renewed only minutes ago
+  // that is refused too isn't renewed again: a refusal that isn't about the
+  // token's end would otherwise spend a refresh token on every request.
+  const relogin = (getAuth, refused) =>
+    locked(async () => {
+      const stored = await getAuth()
+      if (stored?.type !== "oauth" || !stored.access || !stored.uid) throw new SignInGone(`${site.name}: not signed in`)
+      siteOf(site, stored)
+      const a = latest(stored)
+      if (a.access !== refused) return a
+      const now = Date.now()
+      for (const v of spent.values()) if (v.got.access === refused && now - v.at < RELOGIN_GAP) return undefined
+      const next = { ...a, ...(await renew(a)) }
+      await client.auth.set({ path: { id: ID }, body: next })
+      renewals.add(next)
+      return next
+    })
+
   const models = async (cred, again = false) => {
     const key = listingKey(cred)
     let l = listings.get(key)
@@ -2737,7 +2778,10 @@ const makePlugin = (site) => async ({ client }) => {
     })
 
   // ask is the answer to a chat completion on the live account cred.
-  const ask = async (chat, cred, init, named = "", fallback = false) => {
+  // asked is what ask asked with: the account it ended on, which a refused
+  // job token's renewal (relogin, given getAuth) changes.
+  const ask = async (chat, cred, init, named = "", fallback = false, getAuth, asked = {}) => {
+    asked.cred = cred
     let m
     try {
       m = (await models(cred)).find((x) => x.key === chat.model) ?? (await models(cred, true)).find((x) => x.key === chat.model)
@@ -2760,8 +2804,9 @@ const makePlugin = (site) => async ({ client }) => {
     // resend can be queued again before it is answered.
     const deadline = QUEUE.now() + QUEUE.budget
     const ask = { requestSetId: body.request_set_id, requestId: body.request_id, sessionId: body.session_id, modelKey: m.key }
-    for (let waited = 0; ; waited++) {
-      if (waited) {
+    let relogged = false
+    for (let sent = 0, waited = 0; ; sent++) {
+      if (sent) {
         body.request_id = body.chat_record_id = randomUUID()
         ask.requestId = body.request_id
       }
@@ -2781,6 +2826,21 @@ const makePlugin = (site) => async ({ client }) => {
       }
       const f = !res.ok ? failure(res.status, (await res.text()).slice(0, 1 << 20)) : open.first.value?.error
       if (f) call.abort()
+      // a refused job token: renewed once (or the one renewed meanwhile)
+      // and the request sent again, before the refusal is said
+      if (f?.lapsed && getAuth && !relogged) {
+        relogged = true
+        let next
+        try {
+          next = await relogin(getAuth, cred.access)
+        } catch (e) {
+          return signedInError(e)
+        }
+        if (next) {
+          cred = asked.cred = next
+          continue
+        }
+      }
       // an answered call moves its task on, as Qoder's client moves it
       if (!f) task.answered = true
       // with another account, provider or group member after this one
@@ -2792,6 +2852,7 @@ const makePlugin = (site) => async ({ client }) => {
       } catch (e) {
         return errorResponse({ status: 502, message: e?.message ?? String(e) })
       }
+      waited++
     }
   }
 
@@ -2860,7 +2921,9 @@ const makePlugin = (site) => async ({ client }) => {
             }
             const h = new Headers(input instanceof Request ? input.headers : undefined)
             new Headers(init.headers ?? {}).forEach((v, k) => h.set(k, v))
-            return signed(await ask(chat, cred, init, h.get(SESSION)?.trim().slice(0, 128) ?? "", h.get(FALLBACK) === "1"), renewed(cred))
+            const asked = {}
+            const res = await ask(chat, cred, init, h.get(SESSION)?.trim().slice(0, 128) ?? "", h.get(FALLBACK) === "1", getAuth, asked)
+            return signed(res, renewed(cred) || (asked.cred !== cred && renewed(asked.cred)))
           },
         }
       },
