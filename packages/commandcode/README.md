@@ -20,7 +20,12 @@ An account is a Command Code API key. There are three ways to get one:
 
 The key is kept where OpenCode keeps sign-ins (`auth.json`; in magpie,
 `plugin-auth.json`) as `{ "type": "api", "key", "metadata": { "email": <user>, "plan" } }`.
-Keys don't expire, so there is nothing to refresh.
+Keys don't expire, so there is nothing to refresh. A key Command Code
+turns away (revoked, or signed out in Studio) marks the account signed out
+in magpie, which passes over it and offers Sign in again on its row: a
+usage read, or a request answered 401, asks `/alpha/whoami`, and when that
+refuses the key too, says `signIn: "expired"` (`X-Magpie-Sign-In: expired`
+on the request's answer). A clean usage read takes the mark off.
 
 ## Requests
 
