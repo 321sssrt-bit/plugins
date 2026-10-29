@@ -785,12 +785,15 @@ function tooLarge(text, left) {
 
 // errorReply is an error as the API the request was for words one:
 // Anthropic's on /llm/a/, OpenAI's on the others.
-function errorReply(url, status, type, message, headers = new Headers(), requestId) {
+// code is the vendor's error code, kept on the error: magpie and OpenCode
+// tell a refusal of the request apart by it (content_policy_rejected).
+function errorReply(url, status, type, message, headers = new Headers(), requestId, code) {
   headers.set("content-type", "application/json")
   headers.delete("content-length")
   headers.delete("content-encoding")
   const anthropic = new URL(url).pathname.includes("/llm/a/")
-  const body = anthropic ? { type: "error", error: { type, message } } : { error: { message, type, code: null } }
+  const body = anthropic ? { type: "error", error: { type, message } } : { error: { message, type, code: code ?? null } }
+  if (anthropic && code) body.error.code = code
   // Anthropic's error body carries the request id beside the error
   if (anthropic && requestId) body.request_id = requestId
   return new Response(JSON.stringify(body), { status, headers })
@@ -2088,6 +2091,15 @@ export const FactoryAuthPlugin = async ({ client, magpie }) => {
               // the refusal, then what to do about it, as provider.Explain joins them
               const ids = upstreamIds(text, res.headers)
               const msg = `${vendorError(text, statusLine(res.status))}${ids.said} — ${why}`
+              if (contentRefused(res.status, text, res.headers)) {
+                // the usage policy check refused what the request says, not
+                // the account: a 400 invalid_request_error with Factory's
+                // code, as OpenAI words a content refusal. Its 403
+                // permission_error read to agents as a failed sign-in
+                // (yetone/magpie, sweanng: ZCode's "Provider
+                // authentication failed", reason=auth_failed status=403)
+                return answer(errorReply(url, 400, "invalid_request_error", msg, new Headers(res.headers), ids.id, "content_policy_rejected"))
+              }
               return answer(errorReply(url, res.status, "permission_error", msg, new Headers(res.headers), ids.id))
             } catch (e) {
               // Factory refused to renew the sign-in: the built-in failed the
