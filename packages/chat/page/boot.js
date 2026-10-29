@@ -51,5 +51,43 @@
     }
   }
 
-  location.replace("http://127.0.0.1:" + port + "/?" + q.toString());
+  const target = "http://127.0.0.1:" + port + "/?" + q.toString();
+
+  // 服务只听本机的 127.0.0.1，跳过去的是「打开这个页面的浏览器」所在的机器。
+  // magpie web 部署在服务器上、从别的电脑打开时，那台电脑的 127.0.0.1 上没有服务，
+  // 直接跳只会得到「127.0.0.1 拒绝连接」（Discord DM: AIGCFREE，magpie web + nginx）。
+  // 这种情况先说明原因，给出 SSH 端口转发的做法，转好了再点「继续」。
+  if (!isLoopback(location.hostname)) {
+    showRemote(port, target);
+    return;
+  }
+  location.replace(target);
 })();
+
+function isLoopback(host) {
+  const h = String(host || "").toLowerCase().replace(/^\[|\]$/g, "");
+  return h === "" || h === "localhost" || h.endsWith(".localhost") || h === "::1" || /^127\./.test(h);
+}
+
+function showRemote(port, target) {
+  const said = document.getElementById("said");
+  if (!said) return;
+  const host = location.hostname.replace(/^\[|\]$/g, "");
+  said.textContent = "";
+  const p = (text) => {
+    const el = document.createElement("p");
+    el.textContent = text;
+    said.appendChild(el);
+    return el;
+  };
+  p("对话页的服务只在运行 magpie 的那台机器上监听 127.0.0.1:" + port + "，从这台电脑的浏览器连不到它。");
+  p("在这台电脑上开一个 SSH 端口转发，然后点「继续」：");
+  const code = p("ssh -N -L " + port + ":127.0.0.1:" + port + " <用户名>@" + host);
+  code.style.fontFamily = "ui-monospace, Menlo, Consolas, monospace";
+  code.style.userSelect = "all";
+  const go = document.createElement("button");
+  go.type = "button";
+  go.textContent = "继续";
+  go.addEventListener("click", () => location.replace(target));
+  said.appendChild(go);
+}

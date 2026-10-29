@@ -155,6 +155,16 @@ test("the launcher page only navigates: no fetch, XHR or socket, scripts from fi
   expect(html).not.toMatch(/<script>(?!\s*src)/)
 })
 
+test("the launcher page explains the SSH tunnel instead of navigating when magpie web is opened from another machine", () => {
+  const boot = readFileSync(join(dir, "page", "boot.js"), "utf8")
+  const tail = boot.slice(boot.indexOf("function isLoopback"))
+  const { isLoopback } = new Function(tail + "; return { isLoopback }")()
+  for (const h of ["127.0.0.1", "localhost", "[::1]", "magpie.localhost", ""]) expect(isLoopback(h)).toBe(true)
+  for (const h of ["192.168.1.20", "magpie.example.com", "[2001:db8::1]"]) expect(isLoopback(h)).toBe(false)
+  expect(boot).toMatch(/if \(!isLoopback\(location\.hostname\)\)/)
+  expect(boot).toContain("ssh -N -L ")
+})
+
 test("the chat UI sends the token on every API call", () => {
   const app = readFileSync(join(dir, "chat", "app.js"), "utf8")
   // two calls reach the service: api() with its init, and the chat stream
