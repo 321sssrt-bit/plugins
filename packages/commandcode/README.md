@@ -125,6 +125,19 @@ as taking them when it is a Claude model, or when the default list or the
 CLI's table says so. For any other model the plugin says nothing either
 way, and magpie answers from models.dev, as its built-in did.
 
+## Jev, a decision model
+
+Command Code serves TypeSafe's Jev (`typesafe/jev`), a decision model: it
+answers typed questions (`{"state", "questions"}`) with probabilities, and
+holds no conversation. Its `/models` list doesn't name it, so the plugin
+adds it to every plan's list, marked `decides`, and sets `decide` on the
+provider. magpie then offers it as a routing group's classifier and at its
+`/v1/systemone` (as `commandcode-plan/typesafe/jev`), never to an agent to
+chat with. A question goes to `POST /provider/v1/systemone` as the CLI
+(1.88.2) sends it, with the CLI's headers, and Zero Data Retention when the
+switch is on. Command Code decides which plans may use it; a refusal reaches
+magpie with its status, as a chat's does.
+
 ## Not included
 
 - Usage and quota (`/alpha/billing/credits`, the 5-hour and weekly windows).

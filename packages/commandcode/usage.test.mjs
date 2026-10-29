@@ -4,6 +4,13 @@
 import { afterEach, expect, test } from "bun:test"
 import { CommandCodePlugin, _internal } from "./index.mjs"
 
+// talking leaves out the decision model (Jev, jev.test.mjs), which every
+// plan's list has beside the models it talks to
+const talking = (ms) => {
+  delete ms[_internal.JEV]
+  return ms
+}
+
 const real = globalThis.fetch
 afterEach(() => {
   globalThis.fetch = real
@@ -183,7 +190,7 @@ test("a model served on Responses and not chat completions is asked on Responses
   }
   const a = { ...api, metadata: { plan: "Max" } }
   const hooks = await CommandCodePlugin()
-  const ms = await hooks.provider.models({ models: {} }, { auth: a })
+  const ms = talking(await hooks.provider.models({ models: {} }, { auth: a }))
   expect(Object.fromEntries(Object.entries(ms).map(([k, m]) => [k, m.api.npm]))).toEqual({
     "gpt-6-sol": "@ai-sdk/openai",
     "moonshotai/Kimi-K3": "@ai-sdk/openai-compatible",

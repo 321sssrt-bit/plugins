@@ -36,6 +36,18 @@ const MAX_TOKENS = 64000 // the CLI's max_tokens when none is asked
 // expected number to be <=200000 at params.max_tokens") — magpie's
 // CommandCodeMaxOutput
 const MAX_OUTPUT = 200_000
+// TypeSafe's System One, as the CLI asks it (command-code 1.88.2:
+// SYSTEM_ONE_ROUTE "/provider/v1/systemone", SYSTEM_ONE_MODELS
+// ["typesafe/jev"]): a decision model, which answers typed questions
+// ({state, questions}) with probabilities and holds no conversation. Its
+// list (/provider/v1/models) doesn't name it. SYSTEM_ONE_CLI is the CLI
+// whose request this is, sent as its x-command-code-version.
+const JEV = "typesafe/jev"
+const SYSTEM_ONE = BASE + "/systemone"
+const SYSTEM_ONE_CLI = "1.88.2"
+// the CLI's resolveSystemOneModel table
+const JEV_NAMES = { jev: JEV, "jev-latest": JEV, [JEV]: JEV, "typesafe-ai/jev": JEV }
+const JEV_MODEL = { id: JEV, name: "Jev", context: 0, decides: true }
 const ORIGINS = ["https://commandcode.ai", "https://staging.commandcode.ai"]
 const SIGN_IN_TIMEOUT = 10 * 60 * 1000
 
@@ -226,7 +238,9 @@ function configModel(m) {
     ...(m.efforts?.length
       ? { reasoning: true, variants: Object.fromEntries(m.efforts.map((e) => [e, { reasoningEffort: e }])) }
       : {}),
-    tool_call: true,
+    tool_call: !m.decides,
+    // magpie's own field: a decision model, asked at /systemone
+    ...(m.decides ? { decides: true } : {}),
   }
 }
 
@@ -262,7 +276,17 @@ function runtimeModel(m) {
     variants: Object.fromEntries((m.efforts ?? []).map((e) => [e, { reasoningEffort: e }])),
     // magpie's plugin host reads it; the CLI calls the model free
     ...(FREE.has(m.id) ? { free: true } : {}),
+    // magpie's plugin host reads it: a decision model, asked at /systemone
+    ...(m.decides ? { decides: true } : {}),
   }
+}
+
+// withJev is a plan's list with Jev, which Command Code's list doesn't
+// name: the CLI offers it to every plan, and Command Code answers for the
+// plan when it is asked.
+function withJev(out) {
+  if (!out[JEV]) out[JEV] = runtimeModel(JEV_MODEL)
+  return out
 }
 
 // liveModels is the Provider API's list, with the APIs each model is
@@ -1267,9 +1291,34 @@ function providerBody(chat) {
   return e === out.reasoning_effort ? undefined : JSON.stringify(out)
 }
 
+// systemOne asks Command Code's System One as the CLI asks it: the
+// question magpie sent ({model, state, questions}), its model as the CLI
+// names it, with the CLI's headers. Its answer ({model, answers, usage})
+// goes back as it came; a refusal as the built-in's are.
+async function systemOne(key, init, input, place, zdr) {
+  let ask
+  try {
+    const b = init.body ?? (input instanceof Request ? await input.clone().text() : undefined)
+    ask = JSON.parse(typeof b === "string" ? b : new TextDecoder().decode(b))
+    if (ask === null || typeof ask !== "object" || Array.isArray(ask)) throw 0
+  } catch {
+    return { res: errorResponse({ status: 400, message: "a decision model takes a JSON request, not a prompt" }) }
+  }
+  const model = JEV_NAMES[String(ask.model ?? "").toLowerCase()] ?? ask.model ?? JEV
+  const res = await fetch(SYSTEM_ONE, {
+    method: "POST",
+    headers: { ...generateHeaders(key, zdr, place), "x-command-code-version": SYSTEM_ONE_CLI },
+    body: JSON.stringify({ ...ask, model }),
+    signal: init.signal,
+  })
+  if (res.ok) return { res: kept(res) }
+  const text = (await res.text()).slice(0, 1 << 20)
+  return { res: errorResponse(failure(res.status, text)), go: GO_NO_API.test(text) }
+}
+
 // ---- the plugin ---------------------------------------------------------------
 
-export const _internal = { projectSlug, subsSeen, extraSeen, waits, liveKey, failure, goModels, refuses, GO_MODELS, GO_REFUSED, zdrOn }
+export const _internal = { JEV, projectSlug, subsSeen, extraSeen, waits, liveKey, failure, goModels, refuses, GO_MODELS, GO_REFUSED, zdrOn }
 
 export async function CommandCodePlugin({ client, magpie } = {}) {
   // isGo keeps a key as Go's, for its models and endpoint: in the
@@ -1309,7 +1358,15 @@ export async function CommandCodePlugin({ client, magpie } = {}) {
             // the model) goes on to the agent as it came
             const zdr = zdrOn(magpie)
             if (zdr) headers.set(ZDR, "1")
-            const chatting = /\/chat\/completions$/.test(new URL(url).pathname)
+            const path = new URL(url).pathname
+            // a decision model's question (magpie's System One), as the
+            // CLI sends it: with the CLI's headers, not the chat's
+            if (/\/systemone\/?$/.test(path)) {
+              const { res, go } = await systemOne(key, init, input, place, zdr)
+              if (go) await isGo(key, (await getAuth()) ?? auth)
+              return res
+            }
+            const chatting = /\/chat\/completions$/.test(path)
             let chat
             if (chatting) {
               try {
@@ -1381,8 +1438,11 @@ export async function CommandCodePlugin({ client, magpie } = {}) {
         name: "Command Code Plan",
         npm: CHAT,
         api: BASE,
+        // magpie's own field: the provider answers System One (Jev) at
+        // its base's /systemone, through the fetch
+        decide: true,
         ...was,
-        models: { ...Object.fromEntries(MODELS.map((m) => [m.id, configModel(m)])), ...(was.models ?? {}) },
+        models: { ...Object.fromEntries([...MODELS, JEV_MODEL].map((m) => [m.id, configModel(m)])), ...(was.models ?? {}) },
       }
     },
     // the plan's list: the Provider API's, with what each model is served
@@ -1410,15 +1470,15 @@ export async function CommandCodePlugin({ client, magpie } = {}) {
           // the CLI's table stands in: magpie keeps the list it was told
           // last, as the built-in keeps the one it fetched last
           if (fell) out[FELL_BACK] = true
-          return out
+          return withJev(out)
         }
         try {
           const out = Object.fromEntries((await liveModels(key)).filter((m) => keep(m.id)).map((m) => [m.id, runtimeModel(m)]))
-          if (Object.keys(out).length) return out
+          if (Object.keys(out).length) return withJev(out)
         } catch {}
         // the default list stands in, less what the plan refuses
         const out = Object.fromEntries(Object.entries(provider.models ?? {}).filter(([id]) => keep(id)))
-        return Object.assign(out, { [FELL_BACK]: true })
+        return Object.assign(withJev(out), { [FELL_BACK]: true })
       },
     },
   }
